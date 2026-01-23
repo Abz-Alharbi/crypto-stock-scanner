@@ -9,6 +9,7 @@ import os
 from dotenv import load_dotenv
 import requests
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 load_dotenv()
 
@@ -36,24 +37,24 @@ db = SQLAlchemy(app)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Configuration
-MAX_STOCKS = 100  # Reduced for free tier
+# Configuration - REDUCED for free tier to complete within timeout
+MAX_STOCKS = 25  # Only scan top 25 stocks to stay within timeout
 LOOKBACK_DAYS = 365
 MIN_DATA_ROWS = 60
 
-# Polygon.io API Key (now Massive.com but API still works)
-# Get free key at https://polygon.io/ or https://massive.com/
+# Polygon.io API Key
 POLYGON_API_KEY = os.getenv('POLYGON_API_KEY', '')
 
-# Log API key status at startup (without revealing the key)
 if POLYGON_API_KEY:
     logger.info(f"✓ POLYGON_API_KEY is set (length: {len(POLYGON_API_KEY)})")
 else:
     logger.warning("✗ POLYGON_API_KEY is NOT set!")
 
-# Rate limiting for Polygon free tier (5 calls/minute = 12 seconds between calls to be safe)
-RATE_LIMIT_DELAY = 12.5  # seconds between calls for free tier
+# Rate limiting - 5 calls per minute for free tier
+# With 25 stocks, this takes about 5 minutes
+RATE_LIMIT_DELAY = 12.5
 last_api_call = 0
+api_call_lock = False
 
 def rate_limit():
     """Enforce rate limiting for API calls"""
@@ -85,8 +86,15 @@ class ScanResult(db.Model):
     volume = db.Column(db.BigInteger)
 
 # ============ NASDAQ SYMBOLS ============
-# Top liquid NASDAQ stocks
-NASDAQ_SYMBOLS = [
+# Top 25 most liquid NASDAQ stocks for fast scanning
+NASDAQ_SYMBOLS_TOP = [
+    'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'META', 'TSLA', 'AVGO', 
+    'NFLX', 'AMD', 'ADBE', 'CSCO', 'INTC', 'QCOM', 'AMGN', 'SBUX',
+    'PYPL', 'INTU', 'ISRG', 'BKNG', 'GILD', 'MDLZ', 'ADI', 'LRCX', 'TXN'
+]
+
+# Extended list for paid tier
+NASDAQ_SYMBOLS_EXTENDED = [
     'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'META', 'TSLA', 'AVGO', 'COST',
     'NFLX', 'AMD', 'PEP', 'ADBE', 'CSCO', 'CMCSA', 'INTC', 'TMUS', 'INTU', 'TXN',
     'QCOM', 'AMAT', 'AMGN', 'SBUX', 'ISRG', 'BKNG', 'VRTX', 'ADI', 'GILD',
@@ -95,12 +103,14 @@ NASDAQ_SYMBOLS = [
     'WDAY', 'DASH', 'CHTR', 'PCAR', 'CPRT', 'AEP', 'PAYX', 'ROST', 'ODFL', 'KDP',
     'CRWD', 'FAST', 'EA', 'KHC', 'DXCM', 'CTSH', 'VRSK', 'LULU', 'GEHC', 'TTD',
     'TEAM', 'IDXX', 'BKR', 'CSGP', 'EXC', 'ZS', 'ANSS', 'BIIB', 'XEL', 'FANG',
-    'DDOG', 'ILMN', 'ON', 'EBAY', 'WBD', 'MDB', 'ZM', 'WBA', 'ENPH',
-    'ALGN', 'COIN', 'ROKU', 'UBER', 'LYFT', 'MRNA', 'SNAP', 'PLTR', 'RBLX', 'SHOP',
-    'NET', 'MU'
+    'DDOG', 'ILMN', 'ON', 'EBAY', 'WBD', 'MDB', 'ZM', 'WBA', 'ENPH', 'COIN',
+    'ROKU', 'UBER', 'LYFT', 'MRNA', 'SNAP', 'PLTR', 'RBLX', 'SHOP', 'NET', 'MU'
 ]
 
-logger.info(f"Loaded {len(NASDAQ_SYMBOLS)} NASDAQ symbols")
+# Use TOP list by default (faster)
+NASDAQ_SYMBOLS = NASDAQ_SYMBOLS_TOP
+
+logger.info(f"Loaded {len(NASDAQ_SYMBOLS)} NASDAQ symbols (fast mode)")
 
 # ============ TECHNICAL INDICATORS ============
 def calculate_ema(series, span):
@@ -145,7 +155,6 @@ def detect_pattern(df):
 
 # ============ ADVANCED PATTERN DETECTION ============
 def detect_advanced_patterns(df):
-    """Detect multiple technical patterns with confidence levels"""
     patterns = []
     confidence = 0
     support = None
@@ -162,13 +171,11 @@ def detect_advanced_patterns(df):
     highs = df['High'].tail(100).values
     lows = df['Low'].tail(100).values
     
-    # Calculate support and resistance
     recent_high = np.max(highs[-30:])
     recent_low = np.min(lows[-30:])
     resistance = round(float(recent_high), 2)
     support = round(float(recent_low), 2)
     
-    # Head & Shoulders Detection
     try:
         if len(closes) >= 60:
             mid = len(closes) // 2
@@ -192,7 +199,6 @@ def detect_advanced_patterns(df):
     except:
         pass
     
-    # Double Top/Bottom Detection
     try:
         recent_highs = []
         recent_lows = []
@@ -217,7 +223,6 @@ def detect_advanced_patterns(df):
     except:
         pass
     
-    # Trend Detection
     try:
         long_term_change = (closes[-1] - closes[-60]) / closes[-60]
         if long_term_change > 0.15:
@@ -246,7 +251,6 @@ def detect_advanced_patterns(df):
 
 # ============ DATA FETCHING WITH POLYGON ============
 def fetch_stock_data_polygon(symbol, timeframe='1d'):
-    """Fetch stock data from Polygon.io API"""
     try:
         if not POLYGON_API_KEY:
             logger.error(f"{symbol}: POLYGON_API_KEY not set!")
@@ -254,7 +258,6 @@ def fetch_stock_data_polygon(symbol, timeframe='1d'):
         
         rate_limit()
         
-        # Set date range
         end_date = datetime.now()
         if timeframe == '1wk':
             start_date = end_date - timedelta(days=LOOKBACK_DAYS * 2)
@@ -268,7 +271,6 @@ def fetch_stock_data_polygon(symbol, timeframe='1d'):
         from_date = start_date.strftime('%Y-%m-%d')
         to_date = end_date.strftime('%Y-%m-%d')
         
-        # Polygon API endpoint
         url = f"https://api.polygon.io/v2/aggs/ticker/{symbol}/range/{multiplier}/{timespan}/{from_date}/{to_date}"
         params = {
             'adjusted': 'true',
@@ -281,11 +283,11 @@ def fetch_stock_data_polygon(symbol, timeframe='1d'):
         response = requests.get(url, params=params, timeout=30)
         
         if response.status_code == 403:
-            logger.error(f"{symbol}: API key invalid or unauthorized (403)")
+            logger.error(f"{symbol}: API key invalid or unauthorized")
             return None
         
         if response.status_code == 429:
-            logger.warning(f"{symbol}: Rate limited (429), waiting...")
+            logger.warning(f"{symbol}: Rate limited, waiting 60s...")
             time.sleep(60)
             return None
         
@@ -300,16 +302,15 @@ def fetch_stock_data_polygon(symbol, timeframe='1d'):
             return None
         
         if 'results' not in data or not data['results']:
-            logger.warning(f"{symbol}: No results in API response")
+            logger.warning(f"{symbol}: No results")
             return None
         
         results = data['results']
         
         if len(results) < MIN_DATA_ROWS:
-            logger.warning(f"{symbol}: Insufficient data ({len(results)} rows, need {MIN_DATA_ROWS})")
+            logger.warning(f"{symbol}: Insufficient data ({len(results)} rows)")
             return None
         
-        # Convert to DataFrame
         df = pd.DataFrame(results)
         
         df = df.rename(columns={
@@ -332,7 +333,7 @@ def fetch_stock_data_polygon(symbol, timeframe='1d'):
         logger.error(f"{symbol}: Request timeout")
         return None
     except Exception as e:
-        logger.error(f"{symbol}: Polygon fetch error - {type(e).__name__}: {e}")
+        logger.error(f"{symbol}: Error - {type(e).__name__}: {e}")
         return None
 
 def fetch_stock_data(symbol, timeframe='1d'):
@@ -410,7 +411,7 @@ def process_symbol(symbol, selected_filters, timeframe):
             'pattern': eval_result['pattern']
         }
     except Exception as e:
-        logger.error(f"{symbol}: EXCEPTION - {type(e).__name__}: {e}")
+        logger.error(f"{symbol}: EXCEPTION - {e}")
         return None
 
 # ============ API ENDPOINTS ============
@@ -420,12 +421,11 @@ def health():
         'status': 'healthy',
         'nasdaq_symbols': len(NASDAQ_SYMBOLS),
         'polygon_configured': bool(POLYGON_API_KEY),
-        'polygon_key_length': len(POLYGON_API_KEY) if POLYGON_API_KEY else 0
+        'mode': 'fast (25 stocks)' if len(NASDAQ_SYMBOLS) <= 25 else 'extended'
     }), 200
 
 @app.route('/debug')
 def debug():
-    """Debug endpoint to check configuration"""
     return jsonify({
         'polygon_key_set': bool(POLYGON_API_KEY),
         'polygon_key_length': len(POLYGON_API_KEY) if POLYGON_API_KEY else 0,
@@ -433,21 +433,18 @@ def debug():
         'database_url_set': bool(os.getenv('DATABASE_URL')),
         'allowed_origins': allowed_origins,
         'symbols_count': len(NASDAQ_SYMBOLS),
-        'max_stocks': MAX_STOCKS
+        'max_stocks': MAX_STOCKS,
+        'estimated_scan_time': f"{len(NASDAQ_SYMBOLS) * RATE_LIMIT_DELAY / 60:.1f} minutes"
     }), 200
 
 @app.route('/filter', methods=['POST'])
 def filter_assets():
     try:
-        # Check API key first
         if not POLYGON_API_KEY:
             logger.error("POLYGON_API_KEY not configured!")
             return jsonify({
-                'error': 'API key not configured. Please set POLYGON_API_KEY environment variable.',
-                'debug': {
-                    'polygon_key_set': False,
-                    'hint': 'Add POLYGON_API_KEY to your Railway environment variables'
-                }
+                'error': 'API key not configured',
+                'hint': 'Add POLYGON_API_KEY to Railway environment variables'
             }), 500
         
         data = request.get_json()
@@ -464,8 +461,9 @@ def filter_assets():
             return jsonify([]), 200
         
         symbols = NASDAQ_SYMBOLS[:MAX_STOCKS]
+        estimated_time = len(symbols) * RATE_LIMIT_DELAY / 60
         
-        logger.info(f"Scanning {len(symbols)} symbols (this will take ~{len(symbols) * RATE_LIMIT_DELAY / 60:.1f} minutes due to rate limiting)...")
+        logger.info(f"Scanning {len(symbols)} symbols (~{estimated_time:.1f} min)...")
         
         results = []
         processed = 0
@@ -478,16 +476,16 @@ def filter_assets():
                 if result:
                     results.append(result)
                 
-                if processed % 10 == 0:
+                if processed % 5 == 0:
                     logger.info(f"Progress: {processed}/{len(symbols)} ({len(results)} matches)")
                     
             except Exception as e:
                 logger.error(f"{symbol}: Error - {e}")
         
-        logger.info(f"✓ SCAN COMPLETE: {len(results)} matches from {processed} processed")
+        logger.info(f"✓ SCAN COMPLETE: {len(results)} matches from {processed} stocks")
         logger.info(f"=" * 60)
         
-        # Save to database (optional, won't fail if DB not configured)
+        # Save to database
         try:
             for result in results:
                 scan_result = ScanResult(
@@ -506,26 +504,22 @@ def filter_assets():
                 db.session.add(scan_result)
             db.session.commit()
         except Exception as db_error:
-            logger.warning(f"Database save failed (non-critical): {db_error}")
+            logger.warning(f"Database save failed: {db_error}")
             db.session.rollback()
         
         return jsonify(results), 200
         
     except Exception as e:
-        logger.error(f"Filter endpoint error: {type(e).__name__}: {e}")
+        logger.error(f"Filter endpoint error: {e}")
         import traceback
         traceback.print_exc()
-        return jsonify({
-            'error': str(e),
-            'type': type(e).__name__
-        }), 500
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/pattern-analysis', methods=['POST'])
 def pattern_analysis():
     try:
         if not POLYGON_API_KEY:
             return jsonify({
-                'error': 'API key not configured',
                 'patterns': [],
                 'confidence': 0,
                 'support_resistance': None
@@ -548,8 +542,6 @@ def pattern_analysis():
         
         pattern_result = detect_advanced_patterns(df)
         
-        logger.info(f"Found patterns for {symbol}: {pattern_result['patterns']}")
-        
         return jsonify(pattern_result), 200
         
     except Exception as e:
@@ -566,6 +558,7 @@ def home():
         'message': 'NASDAQ Scanner API',
         'status': 'running',
         'data_source': 'Polygon.io (Massive.com)',
+        'mode': 'fast (25 stocks)',
         'polygon_configured': bool(POLYGON_API_KEY),
         'endpoints': {
             'health': '/health',
@@ -578,14 +571,12 @@ def home():
 
 @app.route('/test-symbol/<symbol>')
 def test_single_symbol(symbol):
-    """Test a single symbol to verify API is working"""
     try:
         if not POLYGON_API_KEY:
             return jsonify({
                 'symbol': symbol,
                 'status': 'error',
-                'error': 'POLYGON_API_KEY not set',
-                'hint': 'Add POLYGON_API_KEY to Railway environment variables'
+                'error': 'POLYGON_API_KEY not set'
             }), 200
             
         logger.info(f"Testing symbol: {symbol}")
@@ -596,8 +587,7 @@ def test_single_symbol(symbol):
             return jsonify({
                 'symbol': symbol,
                 'status': 'failed',
-                'error': 'Could not fetch data',
-                'polygon_key_set': bool(POLYGON_API_KEY)
+                'error': 'Could not fetch data'
             }), 200
         
         result = {
@@ -623,8 +613,7 @@ def test_single_symbol(symbol):
         return jsonify({
             'symbol': symbol,
             'status': 'error',
-            'error': str(e),
-            'type': type(e).__name__
+            'error': str(e)
         }), 500
 
 # Initialize database
