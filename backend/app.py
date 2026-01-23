@@ -521,6 +521,19 @@ def pattern_analysis():
             'support_resistance': None
         }), 200
 
+@app.route('/')
+def home():
+    """Root endpoint"""
+    return jsonify({
+        'message': 'Crypto Stock Scanner API',
+        'status': 'running',
+        'endpoints': {
+            'health': '/health',
+            'filter': '/filter (POST)',
+            'pattern_analysis': '/pattern-analysis (POST)'
+        }
+    }), 200
+
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()
