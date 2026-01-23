@@ -447,60 +447,85 @@ def health():
 def filter_assets():
     try:
         data = request.get_json()
+        market = data.get('market', 'NASDAQ')
         selected_filters = data.get('filters', [])
         timeframe = data.get('timeframe', '1d')
+        
+        logger.info(f"=" * 60)
+        logger.info(f"NEW SCAN - Market: {market}, Filters: {selected_filters}, Timeframe: {timeframe}")
         
         if not selected_filters:
             return jsonify([]), 200
         
-        symbols = NASDAQ_SYMBOLS[:MAX_STOCKS]
+        symbols = NASDAQ_SYMBOLS if market == 'NASDAQ' else CRYPTO_SYMBOLS
+        symbols = symbols[:MAX_STOCKS]
         
-        logger.info(f"Scanning {len(symbols)} NASDAQ symbols with {timeframe} timeframe")
+        logger.info(f"Scanning {len(symbols)} symbols...")
         
         results = []
+        processed = 0
+        failed = 0
         
-        with ThreadPoolExecutor(max_workers=10) as executor:
+        with ThreadPoolExecutor(max_workers=5) as executor:
             future_to_symbol = {
-                executor.submit(process_symbol, symbol, selected_filters, timeframe): symbol 
+                executor.submit(process_symbol, symbol, selected_filters, market, timeframe): symbol 
                 for symbol in symbols
             }
             
             for future in as_completed(future_to_symbol):
+                symbol = future_to_symbol[future]
                 try:
-                    result = future.result(timeout=15)
+                    result = future.result(timeout=20)
+                    processed += 1
+                    
                     if result:
                         results.append(result)
+                        logger.info(f"✓ {symbol}: MATCHED {result['filters']}")
+                    
+                    # Progress updates every 20 symbols
+                    if processed % 20 == 0:
+                        logger.info(f"Progress: {processed}/{len(symbols)} ({len(results)} matches, {failed} failed)")
+                        
                 except Exception as e:
-                    logger.error(f"Processing error: {e}")
+                    failed += 1
+                    if failed % 10 == 0:
+                        logger.warning(f"Failed symbols: {failed}")
+        
+        logger.info(f"✓ SCAN COMPLETE: {len(results)} matches, {processed} processed, {failed} failed")
+        logger.info(f"=" * 60)
         
         # Save to database
         for result in results:
-            scan_result = ScanResult(
-                symbol=result['symbol'],
-                market='NASDAQ',
-                timeframe=timeframe,
-                filters_achieved=result['filters'],
-                ema_50=result['values'].get('ema_50'),
-                ema_200=result['values'].get('ema_200'),
-                fibo_50=result['values'].get('fibo'),
-                macd=result['values'].get('macd'),
-                rsi=result['values'].get('rsi'),
-                pattern=result['pattern']
-            )
-            db.session.add(scan_result)
+            try:
+                scan_result = ScanResult(
+                    symbol=result['symbol'],
+                    market=market,
+                    timeframe=timeframe,
+                    filters_achieved=result['filters'],
+                    ema_50=result['values'].get('ema_50'),
+                    ema_200=result['values'].get('ema_200'),
+                    fibo_50=result['values'].get('fibo'),
+                    macd=result['values'].get('macd'),
+                    rsi=result['values'].get('rsi'),
+                    pattern=result['pattern']
+                )
+                db.session.add(scan_result)
+            except:
+                pass
         
         try:
             db.session.commit()
         except:
             db.session.rollback()
         
-        logger.info(f"Found {len(results)} matches")
         return jsonify(results), 200
         
     except Exception as e:
         logger.error(f"Filter endpoint error: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
-
+    
 @app.route('/pattern-analysis', methods=['POST'])
 def pattern_analysis():
     """Detailed pattern analysis for a specific symbol"""
