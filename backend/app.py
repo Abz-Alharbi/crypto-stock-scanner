@@ -39,7 +39,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Configuration
-MAX_STOCKS = 100
+MAX_STOCKS = 500
 LOOKBACK_DAYS = 365
 MIN_DATA_ROWS = 60
 
@@ -466,7 +466,7 @@ def filter_assets():
         processed = 0
         failed = 0
         
-        with ThreadPoolExecutor(max_workers=5) as executor:
+        with ThreadPoolExecutor(max_workers=10) as executor:
             future_to_symbol = {
                 executor.submit(process_symbol, symbol, selected_filters, market, timeframe): symbol 
                 for symbol in symbols
