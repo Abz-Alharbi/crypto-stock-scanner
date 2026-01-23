@@ -10,7 +10,8 @@ import logging
 import os
 from dotenv import load_dotenv
 import requests
-
+import time
+from functools import lru_cache
 load_dotenv()
 
 app = Flask(__name__)
@@ -319,8 +320,12 @@ def detect_advanced_patterns(df):
     }
 
 # ============ DATA FETCHING ============
-def fetch_stock_data(symbol, timeframe='1d'):
+def fetch_stock_data(symbol, timeframe='1d', retry_count=0):
+    """Fetch stock data with retry logic"""
     try:
+        # Add small delay to avoid rate limiting
+        time.sleep(0.1)  # 100ms delay between requests
+        
         ticker = yf.Ticker(symbol)
         end_date = datetime.now()
         
@@ -332,10 +337,19 @@ def fetch_stock_data(symbol, timeframe='1d'):
         df = ticker.history(start=start_date, end=end_date, interval=timeframe, auto_adjust=True)
         
         if df.empty or len(df) < MIN_DATA_ROWS:
+            logger.warning(f"{symbol}: Insufficient data (got {len(df) if not df.empty else 0} rows)")
             return None
         
+        logger.info(f"{symbol}: Fetched {len(df)} rows")
         return df
+        
     except Exception as e:
+        # Retry logic for rate limiting
+        if retry_count < 2 and ("rate" in str(e).lower() or "json" in str(e).lower()):
+            logger.warning(f"{symbol}: Retry {retry_count + 1}/2 after error: {e}")
+            time.sleep(1)  # Wait 1 second before retry
+            return fetch_stock_data(symbol, timeframe, retry_count + 1)
+        
         logger.error(f"Error fetching {symbol} ({timeframe}): {e}")
         return None
 
