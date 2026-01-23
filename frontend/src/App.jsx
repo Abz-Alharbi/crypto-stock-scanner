@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { TrendingUp, Filter, RefreshCw, AlertCircle, BarChart3, Activity, DollarSign, Clock } from 'lucide-react';
-
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 const NasdaqScanner = () => {
   const [timeframe, setTimeframe] = useState('1d');
   const [filters, setFilters] = useState({
@@ -27,7 +27,7 @@ const NasdaqScanner = () => {
 
   const checkBackend = async () => {
     try {
-      const response = await fetch('http://localhost:5000/health');
+      const response = await fetch(`${API_URL}/health`);
       if (response.ok) {
         setBackendStatus('connected');
       } else {
@@ -86,7 +86,7 @@ const NasdaqScanner = () => {
 
       const startTime = Date.now();
       
-      const response = await fetch('http://localhost:5000/filter', {
+      const response = await fetch(`${API_URL}/filter`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -130,7 +130,7 @@ const NasdaqScanner = () => {
     setDetailedPattern(null);
 
     try {
-      const response = await fetch('http://localhost:5000/pattern-analysis', {
+      const response = await fetch(`${API_URL}/pattern-analysis`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
