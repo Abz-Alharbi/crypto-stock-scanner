@@ -1,21 +1,18 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
-import yfinance as yf
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
-from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
 import os
 from dotenv import load_dotenv
 import requests
 import time
-from functools import lru_cache
+
 load_dotenv()
 
 app = Flask(__name__)
-import os
 
 # Get allowed origins from environment or use default
 allowed_origins = os.getenv('ALLOWED_ORIGINS', '*').split(',')
@@ -28,6 +25,7 @@ CORS(app, resources={
         "supports_credentials": True
     }
 })
+
 # Configuration
 app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', 'sqlite:///scanner.db')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
@@ -39,9 +37,25 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Configuration
-MAX_STOCKS = 500
+MAX_STOCKS = 130  # Keep manageable for API rate limits
 LOOKBACK_DAYS = 365
 MIN_DATA_ROWS = 60
+
+# Polygon.io API Key - Get free key at https://polygon.io/
+POLYGON_API_KEY = os.getenv('POLYGON_API_KEY', '')
+
+# Rate limiting for Polygon free tier (5 calls/minute)
+RATE_LIMIT_DELAY = 0.5  # seconds between calls
+last_api_call = 0
+
+def rate_limit():
+    """Enforce rate limiting for API calls"""
+    global last_api_call
+    now = time.time()
+    elapsed = now - last_api_call
+    if elapsed < RATE_LIMIT_DELAY:
+        time.sleep(RATE_LIMIT_DELAY - elapsed)
+    last_api_call = time.time()
 
 # ============ DATABASE MODELS ============
 class ScanResult(db.Model):
@@ -61,54 +75,25 @@ class ScanResult(db.Model):
     last_price = db.Column(db.Float)
     volume = db.Column(db.BigInteger)
 
-# ============ FETCH NASDAQ SYMBOLS ============
-def fetch_nasdaq_symbols_list():
-    """Fetch comprehensive NASDAQ symbol list"""
-    symbols = set()
-    
-    try:
-        logger.info("Fetching NASDAQ symbols from official FTP...")
-        response = requests.get(
-            "ftp://ftp.nasdaqtrader.com/SymbolDirectory/nasdaqlisted.txt",
-            timeout=10
-        )
-        lines = response.text.split('\n')
-        
-        for line in lines[1:]:
-            if '|' in line:
-                parts = line.split('|')
-                symbol = parts[0].strip()
-                if symbol and not any(x in symbol for x in ['^', '.', 'TEST']):
-                    if len(parts) > 4 and parts[4].strip() != 'Y':
-                        symbols.add(symbol)
-        
-        logger.info(f"Fetched {len(symbols)} symbols from NASDAQ FTP")
-    except Exception as e:
-        logger.warning(f"FTP fetch failed: {e}")
-    
-    # Top NASDAQ stocks as fallback
-    top_nasdaq_stocks = [
-        'AAPL', 'MSFT', 'GOOGL', 'GOOG', 'AMZN', 'NVDA', 'META', 'TSLA', 'AVGO', 'COST',
-        'NFLX', 'AMD', 'PEP', 'ADBE', 'CSCO', 'CMCSA', 'INTC', 'TMUS', 'INTU', 'TXN',
-        'QCOM', 'AMAT', 'HON', 'AMGN', 'SBUX', 'ISRG', 'BKNG', 'VRTX', 'ADI', 'GILD',
-        'MDLZ', 'REGN', 'LRCX', 'PYPL', 'ADP', 'PANW', 'KLAC', 'SNPS', 'CDNS', 'MELI',
-        'ABNB', 'ASML', 'MNST', 'FTNT', 'MAR', 'NXPI', 'MRVL', 'ORLY', 'ADSK', 'CTAS',
-        'WDAY', 'DASH', 'CHTR', 'PCAR', 'CPRT', 'AEP', 'PAYX', 'ROST', 'ODFL', 'KDP',
-        'CRWD', 'FAST', 'EA', 'KHC', 'DXCM', 'CTSH', 'VRSK', 'LULU', 'GEHC', 'TTD',
-        'TEAM', 'IDXX', 'BKR', 'CSGP', 'EXC', 'ZS', 'ANSS', 'BIIB', 'XEL', 'FANG',
-        'DDOG', 'ILMN', 'ON', 'EBAY', 'WBD', 'MDB', 'ZM', 'SGEN', 'WBA', 'ENPH',
-        'ALGN', 'SIRI', 'LCID', 'RIVN', 'PLUG', 'COIN', 'ROKU', 'HOOD', 'UBER', 'LYFT',
-        'MRNA', 'ZI', 'SNAP', 'SOFI', 'CVNA', 'SNOW', 'PLTR', 'RBLX', 'SHOP', 'SQ',
-        'PINS', 'DOCU', 'NET', 'DELL', 'HPQ', 'MU', 'WDC', 'NTAP', 'STX', 'SMCI',
-        'ANET', 'MCHP', 'SWKS', 'MPWR', 'AKAM', 'JNPR', 'FFIV', 'ZBRA', 'VRSN', 'NLOK'
-    ]
-    
-    symbols.update(top_nasdaq_stocks)
-    symbol_list = sorted(list(symbols))
-    logger.info(f"Total NASDAQ symbols loaded: {len(symbol_list)}")
-    return symbol_list
+# ============ NASDAQ SYMBOLS ============
+# Using a curated list of liquid NASDAQ stocks for reliability
+NASDAQ_SYMBOLS = [
+    'AAPL', 'MSFT', 'GOOGL', 'GOOG', 'AMZN', 'NVDA', 'META', 'TSLA', 'AVGO', 'COST',
+    'NFLX', 'AMD', 'PEP', 'ADBE', 'CSCO', 'CMCSA', 'INTC', 'TMUS', 'INTU', 'TXN',
+    'QCOM', 'AMAT', 'HON', 'AMGN', 'SBUX', 'ISRG', 'BKNG', 'VRTX', 'ADI', 'GILD',
+    'MDLZ', 'REGN', 'LRCX', 'PYPL', 'ADP', 'PANW', 'KLAC', 'SNPS', 'CDNS', 'MELI',
+    'ABNB', 'ASML', 'MNST', 'FTNT', 'MAR', 'NXPI', 'MRVL', 'ORLY', 'ADSK', 'CTAS',
+    'WDAY', 'DASH', 'CHTR', 'PCAR', 'CPRT', 'AEP', 'PAYX', 'ROST', 'ODFL', 'KDP',
+    'CRWD', 'FAST', 'EA', 'KHC', 'DXCM', 'CTSH', 'VRSK', 'LULU', 'GEHC', 'TTD',
+    'TEAM', 'IDXX', 'BKR', 'CSGP', 'EXC', 'ZS', 'ANSS', 'BIIB', 'XEL', 'FANG',
+    'DDOG', 'ILMN', 'ON', 'EBAY', 'WBD', 'MDB', 'ZM', 'WBA', 'ENPH',
+    'ALGN', 'SIRI', 'LCID', 'RIVN', 'PLUG', 'COIN', 'ROKU', 'HOOD', 'UBER', 'LYFT',
+    'MRNA', 'SNAP', 'SOFI', 'CVNA', 'SNOW', 'PLTR', 'RBLX', 'SHOP',
+    'PINS', 'DOCU', 'NET', 'DELL', 'HPQ', 'MU', 'WDC', 'NTAP', 'STX', 'SMCI',
+    'ANET', 'MCHP', 'SWKS', 'MPWR', 'AKAM', 'JNPR', 'FFIV', 'ZBRA', 'VRSN'
+]
 
-NASDAQ_SYMBOLS = fetch_nasdaq_symbols_list()
+logger.info(f"Loaded {len(NASDAQ_SYMBOLS)} NASDAQ symbols")
 
 # ============ TECHNICAL INDICATORS ============
 def calculate_ema(series, span):
@@ -319,39 +304,86 @@ def detect_advanced_patterns(df):
         } if support and resistance else None
     }
 
-# ============ DATA FETCHING ============
-def fetch_stock_data(symbol, timeframe='1d', retry_count=0):
-    """Fetch stock data with retry logic"""
+# ============ DATA FETCHING WITH POLYGON ============
+def fetch_stock_data_polygon(symbol, timeframe='1d'):
+    """Fetch stock data from Polygon.io API"""
     try:
-        # Add small delay to avoid rate limiting
-        time.sleep(0.1)  # 100ms delay between requests
-        
-        ticker = yf.Ticker(symbol)
-        end_date = datetime.now()
-        
-        if timeframe == '1wk':
-            start_date = end_date - timedelta(days=LOOKBACK_DAYS * 2)
-        else:
-            start_date = end_date - timedelta(days=LOOKBACK_DAYS)
-        
-        df = ticker.history(start=start_date, end=end_date, interval=timeframe, auto_adjust=True)
-        
-        if df.empty or len(df) < MIN_DATA_ROWS:
-            logger.warning(f"{symbol}: Insufficient data (got {len(df) if not df.empty else 0} rows)")
+        if not POLYGON_API_KEY:
+            logger.error("POLYGON_API_KEY not set!")
             return None
         
-        logger.info(f"{symbol}: Fetched {len(df)} rows")
+        rate_limit()
+        
+        # Set date range
+        end_date = datetime.now()
+        if timeframe == '1wk':
+            start_date = end_date - timedelta(days=LOOKBACK_DAYS * 2)
+            multiplier = 1
+            timespan = 'week'
+        else:
+            start_date = end_date - timedelta(days=LOOKBACK_DAYS)
+            multiplier = 1
+            timespan = 'day'
+        
+        # Format dates
+        from_date = start_date.strftime('%Y-%m-%d')
+        to_date = end_date.strftime('%Y-%m-%d')
+        
+        # Polygon API endpoint
+        url = f"https://api.polygon.io/v2/aggs/ticker/{symbol}/range/{multiplier}/{timespan}/{from_date}/{to_date}"
+        params = {
+            'adjusted': 'true',
+            'sort': 'asc',
+            'limit': 50000,
+            'apiKey': POLYGON_API_KEY
+        }
+        
+        response = requests.get(url, params=params, timeout=30)
+        
+        if response.status_code != 200:
+            logger.warning(f"{symbol}: API returned status {response.status_code}")
+            return None
+        
+        data = response.json()
+        
+        if data.get('status') != 'OK' or 'results' not in data:
+            logger.warning(f"{symbol}: No results in API response")
+            return None
+        
+        results = data['results']
+        
+        if len(results) < MIN_DATA_ROWS:
+            logger.warning(f"{symbol}: Insufficient data ({len(results)} rows)")
+            return None
+        
+        # Convert to DataFrame
+        df = pd.DataFrame(results)
+        
+        # Rename columns to match expected format
+        df = df.rename(columns={
+            't': 'timestamp',
+            'o': 'Open',
+            'h': 'High',
+            'l': 'Low',
+            'c': 'Close',
+            'v': 'Volume'
+        })
+        
+        # Convert timestamp to datetime index
+        df['Date'] = pd.to_datetime(df['timestamp'], unit='ms')
+        df.set_index('Date', inplace=True)
+        df = df[['Open', 'High', 'Low', 'Close', 'Volume']]
+        
+        logger.info(f"{symbol}: Fetched {len(df)} rows from Polygon")
         return df
         
     except Exception as e:
-        # Retry logic for rate limiting
-        if retry_count < 2 and ("rate" in str(e).lower() or "json" in str(e).lower()):
-            logger.warning(f"{symbol}: Retry {retry_count + 1}/2 after error: {e}")
-            time.sleep(1)  # Wait 1 second before retry
-            return fetch_stock_data(symbol, timeframe, retry_count + 1)
-        
-        logger.error(f"Error fetching {symbol} ({timeframe}): {e}")
+        logger.error(f"{symbol}: Polygon fetch error - {e}")
         return None
+
+# Use Polygon for data fetching
+def fetch_stock_data(symbol, timeframe='1d'):
+    return fetch_stock_data_polygon(symbol, timeframe)
 
 # ============ FILTER EVALUATION ============
 def evaluate_filters(df, selected_filters):
@@ -400,59 +432,36 @@ def evaluate_filters(df, selected_filters):
         return None
 
 # ============ PROCESS SYMBOL ============
-def process_symbol(symbol, selected_filters, market, timeframe):
+def process_symbol(symbol, selected_filters, timeframe):
     try:
         logger.info(f"Processing {symbol}...")
         
-        if market == 'NASDAQ':
-            df = fetch_stock_data(symbol, timeframe)
-        else:
-            df = fetch_crypto_data(symbol, timeframe)
+        df = fetch_stock_data(symbol, timeframe)
         
         if df is None:
             logger.warning(f"{symbol}: Data fetch returned None")
             return None
         
-        logger.info(f"{symbol}: Got {len(df)} rows of data")
-        
         eval_result = evaluate_filters(df, selected_filters)
+        
         if eval_result is None:
-            logger.warning(f"{symbol}: Filter evaluation returned None")
+            logger.warning(f"{symbol}: Filter evaluation failed")
             return None
             
         if not eval_result['filters_achieved']:
             logger.info(f"{symbol}: No filters matched")
             return None
         
-        # Prepare chart data
-        chart_df = df.tail(90).copy()
-        chart_df['EMA_50'] = calculate_ema(df['Close'], 50).tail(90)
-        chart_df['EMA_200'] = calculate_ema(df['Close'], 200).tail(90)
-        
-        chart_data = []
-        for idx, row in chart_df.iterrows():
-            chart_data.append({
-                'date': idx.strftime('%Y-%m-%d'),
-                'price': round(float(row['Close']), 2),
-                'ema50': round(float(row['EMA_50']), 2),
-                'ema200': round(float(row['EMA_200']), 2)
-            })
-        
-        display_symbol = symbol.replace('/USDT', '') if market == 'CRYPTO' else symbol
-        
         logger.info(f"✓ {symbol}: SUCCESS - Matched {eval_result['filters_achieved']}")
         
         return {
-            'symbol': display_symbol,
+            'symbol': symbol,
             'filters': eval_result['filters_achieved'],
             'values': eval_result['values'],
-            'pattern': eval_result['pattern'],
-            'chartData': chart_data
+            'pattern': eval_result['pattern']
         }
     except Exception as e:
         logger.error(f"{symbol}: EXCEPTION - {type(e).__name__}: {str(e)}")
-        import traceback
-        logger.error(traceback.format_exc())
         return None
 
 # ============ API ENDPOINTS ============
@@ -460,25 +469,28 @@ def process_symbol(symbol, selected_filters, market, timeframe):
 def health():
     return jsonify({
         'status': 'healthy',
-        'nasdaq_symbols': len(NASDAQ_SYMBOLS)
+        'nasdaq_symbols': len(NASDAQ_SYMBOLS),
+        'polygon_configured': bool(POLYGON_API_KEY)
     }), 200
 
 @app.route('/filter', methods=['POST'])
 def filter_assets():
     try:
         data = request.get_json()
-        market = data.get('market', 'NASDAQ')
         selected_filters = data.get('filters', [])
         timeframe = data.get('timeframe', '1d')
         
         logger.info(f"=" * 60)
-        logger.info(f"NEW SCAN - Market: {market}, Filters: {selected_filters}, Timeframe: {timeframe}")
+        logger.info(f"NEW SCAN - Filters: {selected_filters}, Timeframe: {timeframe}")
         
         if not selected_filters:
             return jsonify([]), 200
         
-        symbols = NASDAQ_SYMBOLS if market == 'NASDAQ' else CRYPTO_SYMBOLS
-        symbols = symbols[:MAX_STOCKS]
+        if not POLYGON_API_KEY:
+            logger.error("POLYGON_API_KEY not configured!")
+            return jsonify({'error': 'API key not configured'}), 500
+        
+        symbols = NASDAQ_SYMBOLS[:MAX_STOCKS]
         
         logger.info(f"Scanning {len(symbols)} symbols...")
         
@@ -486,30 +498,23 @@ def filter_assets():
         processed = 0
         failed = 0
         
-        with ThreadPoolExecutor(max_workers=10) as executor:
-            future_to_symbol = {
-                executor.submit(process_symbol, symbol, selected_filters, market, timeframe): symbol 
-                for symbol in symbols
-            }
-            
-            for future in as_completed(future_to_symbol):
-                symbol = future_to_symbol[future]
-                try:
-                    result = future.result(timeout=20)
-                    processed += 1
+        # Process sequentially to respect rate limits
+        for symbol in symbols:
+            try:
+                result = process_symbol(symbol, selected_filters, timeframe)
+                processed += 1
+                
+                if result:
+                    results.append(result)
+                    logger.info(f"✓ {symbol}: MATCHED {result['filters']}")
+                
+                # Progress updates every 20 symbols
+                if processed % 20 == 0:
+                    logger.info(f"Progress: {processed}/{len(symbols)} ({len(results)} matches)")
                     
-                    if result:
-                        results.append(result)
-                        logger.info(f"✓ {symbol}: MATCHED {result['filters']}")
-                    
-                    # Progress updates every 20 symbols
-                    if processed % 20 == 0:
-                        logger.info(f"Progress: {processed}/{len(symbols)} ({len(results)} matches, {failed} failed)")
-                        
-                except Exception as e:
-                    failed += 1
-                    if failed % 10 == 0:
-                        logger.warning(f"Failed symbols: {failed}")
+            except Exception as e:
+                failed += 1
+                logger.error(f"{symbol}: Error - {e}")
         
         logger.info(f"✓ SCAN COMPLETE: {len(results)} matches, {processed} processed, {failed} failed")
         logger.info(f"=" * 60)
@@ -519,7 +524,7 @@ def filter_assets():
             try:
                 scan_result = ScanResult(
                     symbol=result['symbol'],
-                    market=market,
+                    market='NASDAQ',
                     timeframe=timeframe,
                     filters_achieved=result['filters'],
                     ema_50=result['values'].get('ema_50'),
@@ -527,7 +532,8 @@ def filter_assets():
                     fibo_50=result['values'].get('fibo'),
                     macd=result['values'].get('macd'),
                     rsi=result['values'].get('rsi'),
-                    pattern=result['pattern']
+                    pattern=result['pattern'],
+                    last_price=result['values'].get('last_price')
                 )
                 db.session.add(scan_result)
             except:
@@ -545,7 +551,7 @@ def filter_assets():
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
-    
+
 @app.route('/pattern-analysis', methods=['POST'])
 def pattern_analysis():
     """Detailed pattern analysis for a specific symbol"""
@@ -584,42 +590,41 @@ def pattern_analysis():
 def home():
     """Root endpoint"""
     return jsonify({
-        'message': 'Crypto Stock Scanner API',
+        'message': 'NASDAQ Scanner API',
         'status': 'running',
+        'data_source': 'Polygon.io',
         'endpoints': {
             'health': '/health',
             'filter': '/filter (POST)',
             'pattern_analysis': '/pattern-analysis (POST)'
         }
     }), 200
+
 @app.route('/test-symbol/<symbol>')
 def test_single_symbol(symbol):
     """Test endpoint for debugging a single symbol"""
     try:
         logger.info(f"Testing symbol: {symbol}")
         
-        # Try to fetch data
         df = fetch_stock_data(symbol, '1d')
         
         if df is None:
             return jsonify({
                 'symbol': symbol,
                 'status': 'failed',
-                'error': 'fetch_stock_data returned None'
+                'error': 'fetch_stock_data returned None',
+                'polygon_key_set': bool(POLYGON_API_KEY)
             }), 200
         
-        # Show data info
         result = {
             'symbol': symbol,
             'status': 'success',
             'rows': len(df),
             'columns': list(df.columns),
             'date_range': f"{df.index[0]} to {df.index[-1]}",
-            'last_close': float(df['Close'].iloc[-1]),
-            'first_5_rows': df.head().to_dict()
+            'last_close': float(df['Close'].iloc[-1])
         }
         
-        # Try to calculate indicators
         try:
             df['EMA_50'] = calculate_ema(df['Close'], 50)
             df['RSI'] = calculate_rsi(df)
@@ -637,8 +642,10 @@ def test_single_symbol(symbol):
             'error': str(e),
             'type': type(e).__name__
         }), 500
+
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()
     logger.info(f"Loaded {len(NASDAQ_SYMBOLS)} NASDAQ symbols")
+    logger.info(f"Polygon API Key configured: {bool(POLYGON_API_KEY)}")
     app.run(debug=True, host='0.0.0.0', port=5000, threaded=True)
