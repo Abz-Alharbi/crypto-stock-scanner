@@ -400,17 +400,31 @@ def evaluate_filters(df, selected_filters):
         return None
 
 # ============ PROCESS SYMBOL ============
-def process_symbol(symbol, selected_filters, timeframe):
+def process_symbol(symbol, selected_filters, market, timeframe):
     try:
-        df = fetch_stock_data(symbol, timeframe)
+        logger.info(f"Processing {symbol}...")
+        
+        if market == 'NASDAQ':
+            df = fetch_stock_data(symbol, timeframe)
+        else:
+            df = fetch_crypto_data(symbol, timeframe)
         
         if df is None:
+            logger.warning(f"{symbol}: Data fetch returned None")
             return None
+        
+        logger.info(f"{symbol}: Got {len(df)} rows of data")
         
         eval_result = evaluate_filters(df, selected_filters)
-        if eval_result is None or not eval_result['filters_achieved']:
+        if eval_result is None:
+            logger.warning(f"{symbol}: Filter evaluation returned None")
+            return None
+            
+        if not eval_result['filters_achieved']:
+            logger.info(f"{symbol}: No filters matched")
             return None
         
+        # Prepare chart data
         chart_df = df.tail(90).copy()
         chart_df['EMA_50'] = calculate_ema(df['Close'], 50).tail(90)
         chart_df['EMA_200'] = calculate_ema(df['Close'], 200).tail(90)
@@ -424,15 +438,21 @@ def process_symbol(symbol, selected_filters, timeframe):
                 'ema200': round(float(row['EMA_200']), 2)
             })
         
+        display_symbol = symbol.replace('/USDT', '') if market == 'CRYPTO' else symbol
+        
+        logger.info(f"✓ {symbol}: SUCCESS - Matched {eval_result['filters_achieved']}")
+        
         return {
-            'symbol': symbol,
+            'symbol': display_symbol,
             'filters': eval_result['filters_achieved'],
             'values': eval_result['values'],
             'pattern': eval_result['pattern'],
             'chartData': chart_data
         }
     except Exception as e:
-        logger.error(f"Error processing {symbol}: {e}")
+        logger.error(f"{symbol}: EXCEPTION - {type(e).__name__}: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
         return None
 
 # ============ API ENDPOINTS ============
@@ -572,7 +592,51 @@ def home():
             'pattern_analysis': '/pattern-analysis (POST)'
         }
     }), 200
-
+@app.route('/test-symbol/<symbol>')
+def test_single_symbol(symbol):
+    """Test endpoint for debugging a single symbol"""
+    try:
+        logger.info(f"Testing symbol: {symbol}")
+        
+        # Try to fetch data
+        df = fetch_stock_data(symbol, '1d')
+        
+        if df is None:
+            return jsonify({
+                'symbol': symbol,
+                'status': 'failed',
+                'error': 'fetch_stock_data returned None'
+            }), 200
+        
+        # Show data info
+        result = {
+            'symbol': symbol,
+            'status': 'success',
+            'rows': len(df),
+            'columns': list(df.columns),
+            'date_range': f"{df.index[0]} to {df.index[-1]}",
+            'last_close': float(df['Close'].iloc[-1]),
+            'first_5_rows': df.head().to_dict()
+        }
+        
+        # Try to calculate indicators
+        try:
+            df['EMA_50'] = calculate_ema(df['Close'], 50)
+            df['RSI'] = calculate_rsi(df)
+            result['ema_50'] = float(df['EMA_50'].iloc[-1])
+            result['rsi'] = float(df['RSI'].iloc[-1])
+        except Exception as e:
+            result['indicator_error'] = str(e)
+        
+        return jsonify(result), 200
+        
+    except Exception as e:
+        return jsonify({
+            'symbol': symbol,
+            'status': 'error',
+            'error': str(e),
+            'type': type(e).__name__
+        }), 500
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()
