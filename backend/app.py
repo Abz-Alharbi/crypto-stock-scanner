@@ -14,8 +14,19 @@ import requests
 load_dotenv()
 
 app = Flask(__name__)
-CORS(app)
+import os
 
+# Get allowed origins from environment or use default
+allowed_origins = os.getenv('ALLOWED_ORIGINS', '*').split(',')
+
+CORS(app, resources={
+    r"/*": {
+        "origins": allowed_origins,
+        "methods": ["GET", "POST", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Accept"],
+        "supports_credentials": True
+    }
+})
 # Configuration
 app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', 'sqlite:///scanner.db')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
