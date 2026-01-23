@@ -39,7 +39,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Configuration
-MAX_STOCKS = 200
+MAX_STOCKS = 100
 LOOKBACK_DAYS = 365
 MIN_DATA_ROWS = 60
 
