@@ -1,0 +1,212 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================================
+   THEME: Dark Mode (default)
+   ============================================================ */
+:root, [data-theme="dark"] {
+  --color-bg: #0a0e17;
+  --color-surface: #111827;
+  --color-card: #1a1f2e;
+  --color-border: #2a3144;
+  --color-accent: #00d4aa;
+  --color-accent-dim: rgba(0, 212, 170, 0.13);
+  --color-warning: #f59e0b;
+  --color-danger: #ef4444;
+  --color-bullish: #00d4aa;
+  --color-bearish: #ef4444;
+  --color-neutral: #6b7280;
+  --color-text: #e5e7eb;
+  --color-text-dim: #9ca3af;
+  --color-text-muted: #6b7280;
+
+  /* Scrollbar */
+  --scrollbar-track: transparent;
+  --scrollbar-thumb: #2a3144;
+  --scrollbar-thumb-hover: #3a4154;
+
+  /* Glass */
+  --glass-bg: rgba(17, 24, 39, 0.7);
+  --glass-border: rgba(42, 49, 68, 0.5);
+
+  /* Skeleton */
+  --skeleton-from: #1a1f2e;
+  --skeleton-via: #222838;
+
+  /* Signal badges */
+  --signal-bullish-bg: rgba(0, 212, 170, 0.1);
+  --signal-bullish-border: rgba(0, 212, 170, 0.3);
+  --signal-bearish-bg: rgba(239, 68, 68, 0.1);
+  --signal-bearish-border: rgba(239, 68, 68, 0.3);
+  --signal-neutral-bg: rgba(107, 114, 128, 0.1);
+  --signal-neutral-border: rgba(107, 114, 128, 0.3);
+
+  /* Shadows */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 10px 30px rgba(0, 0, 0, 0.5);
+
+  /* Noise opacity */
+  --noise-opacity: 0.02;
+}
+
+/* ============================================================
+   THEME: Light Mode
+   ============================================================ */
+[data-theme="light"] {
+  --color-bg: #f0f2f5;
+  --color-surface: #ffffff;
+  --color-card: #ffffff;
+  --color-border: #e2e5ea;
+  --color-accent: #00a886;
+  --color-accent-dim: rgba(0, 168, 134, 0.1);
+  --color-warning: #d97706;
+  --color-danger: #dc2626;
+  --color-bullish: #059669;
+  --color-bearish: #dc2626;
+  --color-neutral: #6b7280;
+  --color-text: #1a1f2e;
+  --color-text-dim: #6b7280;
+  --color-text-muted: #9ca3af;
+
+  /* Scrollbar */
+  --scrollbar-track: transparent;
+  --scrollbar-thumb: #d1d5db;
+  --scrollbar-thumb-hover: #b0b5bd;
+
+  /* Glass */
+  --glass-bg: rgba(255, 255, 255, 0.8);
+  --glass-border: rgba(226, 229, 234, 0.6);
+
+  /* Skeleton */
+  --skeleton-from: #e5e7eb;
+  --skeleton-via: #f3f4f6;
+
+  /* Signal badges */
+  --signal-bullish-bg: rgba(5, 150, 105, 0.08);
+  --signal-bullish-border: rgba(5, 150, 105, 0.25);
+  --signal-bearish-bg: rgba(220, 38, 38, 0.08);
+  --signal-bearish-border: rgba(220, 38, 38, 0.25);
+  --signal-neutral-bg: rgba(107, 114, 128, 0.08);
+  --signal-neutral-border: rgba(107, 114, 128, 0.25);
+
+  /* Shadows */
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.06);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 10px 30px rgba(0, 0, 0, 0.1);
+
+  /* Noise opacity */
+  --noise-opacity: 0.01;
+}
+
+/* ============================================================
+   BASE STYLES
+   ============================================================ */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'DM Sans', system-ui, sans-serif;
+  background-color: var(--color-bg);
+  color: var(--color-text);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--scrollbar-track); }
+::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); }
+
+/* Trading chart container */
+.chart-container {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+/* Signal badges */
+.signal-bullish {
+  color: var(--color-bullish);
+  background: var(--signal-bullish-bg);
+  border: 1px solid var(--signal-bullish-border);
+}
+.signal-bearish {
+  color: var(--color-bearish);
+  background: var(--signal-bearish-bg);
+  border: 1px solid var(--signal-bearish-border);
+}
+.signal-neutral {
+  color: var(--color-neutral);
+  background: var(--signal-neutral-bg);
+  border: 1px solid var(--signal-neutral-border);
+}
+
+/* Noise texture overlay */
+.noise-bg::before {
+  content: '';
+  position: fixed;
+  top: 0; left: 0; width: 100%; height: 100%;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.02'/%3E%3C/svg%3E");
+  pointer-events: none;
+  z-index: 0;
+  opacity: var(--noise-opacity);
+}
+
+/* Glass effect */
+.glass {
+  background: var(--glass-bg);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--glass-border);
+}
+
+/* Gradient border effect */
+.gradient-border {
+  position: relative;
+}
+.gradient-border::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--color-accent), transparent);
+  opacity: 0.5;
+}
+
+/* Pulse dot */
+@keyframes pulseDot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(1.5); }
+}
+.pulse-dot {
+  animation: pulseDot 2s ease-in-out infinite;
+}
+
+/* Loading skeleton */
+.skeleton {
+  background: linear-gradient(90deg, var(--skeleton-from) 25%, var(--skeleton-via) 50%, var(--skeleton-from) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* ============================================================
+   THEME TRANSITION - smooth color changes
+   ============================================================ */
+.theme-transition,
+.theme-transition *,
+.theme-transition *::before,
+.theme-transition *::after {
+  transition: background-color 0.3s ease, border-color 0.3s ease, color 0.3s ease, box-shadow 0.3s ease !important;
+}
