@@ -1,0 +1,164 @@
+import os
+
+import click
+from flask import Flask
+from flask_cors import CORS
+
+from backend.auth.service import create_admin
+from backend.config import get_config
+from backend.errors import register_error_handlers
+from backend.extensions import db, migrate
+from backend.models.user import User
+from backend.symbols import canonicalize_symbol
+
+
+def _parse_allowed_origins(value):
+    origins = [origin.strip() for origin in str(value).split(",") if origin.strip()]
+    return origins or ["http://localhost:5173"]
+
+
+def _register_blueprints(app):
+    from backend.api.admin_routes import admin_bp
+    from backend.api.fundamentals_routes import fundamentals_bp
+    from backend.api.news_routes import news_bp
+    from backend.api.scan_routes import scan_bp
+    from backend.api.watchlist_routes import watchlist_bp
+    from backend.auth.routes import auth_bp
+
+    app.register_blueprint(auth_bp)
+    app.register_blueprint(scan_bp)
+    app.register_blueprint(watchlist_bp)
+    app.register_blueprint(admin_bp)
+    app.register_blueprint(news_bp)
+    app.register_blueprint(fundamentals_bp)
+
+
+def _register_cli(app):
+    @app.cli.command("create-admin")
+    @click.option("--email", required=True, help="Admin email address.")
+    @click.option("--password", required=True, help="Admin password.")
+    def create_admin_command(email, password):
+        """Create the first admin account."""
+        email = email.strip().lower()
+        if User.query.filter_by(role="admin").first():
+            raise click.ClickException("An admin account already exists.")
+        if User.query.filter_by(email=email).first():
+            raise click.ClickException("A user with that email already exists.")
+        user, _created = create_admin(email, password)
+        click.echo(f"Created admin account: {user.email}")
+
+    @app.cli.command("seed-db")
+    def seed_db_command():
+        """Insert safe local development data."""
+        from backend.models.scan import ScanHistory, ScanResult
+        from backend.models.watchlist import Watchlist
+
+        user = User.query.filter_by(email="dev@marketscanner.local").first()
+        if not user:
+            user = User(
+                username="dev_user",
+                email="dev@marketscanner.local",
+                role="user",
+                plan="free",
+            )
+            user.set_password("dev-password-change-me")
+            db.session.add(user)
+            db.session.flush()
+
+        for symbol, market, notes in (
+            ("AAPL", "stocks", "Sample equity watch item"),
+            ("MSFT", "stocks", "Sample equity watch item"),
+            ("X:BTCUSD", "crypto", "Sample crypto watch item"),
+        ):
+            canonical = canonicalize_symbol(symbol, market)
+            exists = Watchlist.query.filter_by(user_id=user.id, symbol=canonical.provider_symbol).first()
+            if not exists:
+                db.session.add(
+                    Watchlist(
+                        user_id=user.id,
+                        symbol=canonical.provider_symbol,
+                        provider_symbol=canonical.provider_symbol,
+                        display_symbol=canonical.display_symbol,
+                        market=canonical.market,
+                        notes=notes,
+                    )
+                )
+
+        if not ScanHistory.query.first():
+            db.session.add(
+                ScanHistory(
+                    user_id=user.id,
+                    job_id="seed-scan",
+                    market="stocks",
+                    timeframe="1D",
+                    total_scanned=3,
+                    total_matched=1,
+                    filters_used='["rsi_oversold"]',
+                    duration_seconds=0.12,
+                )
+            )
+
+        if not ScanResult.query.first():
+            db.session.add(
+                ScanResult(
+                    user_id=user.id,
+                    job_id="seed-scan",
+                    symbol="AAPL",
+                    provider_symbol="AAPL",
+                    display_symbol="AAPL",
+                    market="stocks",
+                    timeframe="1D",
+                    scan_type="filter_scan",
+                    filters_matched='["rsi_oversold"]',
+                    indicator_values='{"rsi": 28.4}',
+                    last_price=195.12,
+                    volume=1000000,
+                    signal="bullish",
+                )
+            )
+
+        db.session.commit()
+        click.echo("Seeded local development data.")
+
+
+def create_app(config=None):
+    app = Flask(__name__)
+    if isinstance(config, dict):
+        app.config.from_object(get_config(None))
+        app.config.update(config)
+    else:
+        app.config.from_object(get_config(config))
+
+    if os.getenv("FLASK_ENV") != "development":
+        app.config["DEBUG"] = False
+
+    CORS(
+        app,
+        resources={
+            r"/api/*": {
+                "origins": _parse_allowed_origins(app.config.get("ALLOWED_ORIGINS")),
+            }
+        },
+    )
+
+    @app.after_request
+    def add_security_headers(response):
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Strict-Transport-Security"] = "max-age=63072000"
+        return response
+
+    db.init_app(app)
+    migrate.init_app(app, db)
+    register_error_handlers(app)
+
+    from backend import models  # noqa: F401
+
+    _register_blueprints(app)
+    _register_cli(app)
+
+    if app.config.get("AUTO_CREATE_SCHEMA"):
+        with app.app_context():
+            db.create_all()
+
+    return app

@@ -1,0 +1,12 @@
+.env
+__pycache__/
+node_modules/
+*.pyc
+logs/
+models/
+model.pt
+.venv/
+venv/
+dist/
+instance/*.db
+*.db
