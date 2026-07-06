@@ -8,6 +8,7 @@ from backend.auth.service import create_admin
 from backend.config import get_config
 from backend.errors import register_error_handlers
 from backend.extensions import db, migrate
+from backend.logging_config import configure_logging
 from backend.models.user import User
 from backend.symbols import canonicalize_symbol
 
@@ -21,16 +22,22 @@ def _register_blueprints(app):
     from backend.api.admin_routes import admin_bp
     from backend.api.fundamentals_routes import fundamentals_bp
     from backend.api.news_routes import news_bp
+    from backend.api.notification_routes import notifications_bp
+    from backend.api.ops_routes import ops_bp
+    from backend.api.pattern_routes import pattern_bp
     from backend.api.scan_routes import scan_bp
     from backend.api.watchlist_routes import watchlist_bp
     from backend.auth.routes import auth_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(scan_bp)
+    app.register_blueprint(notifications_bp)
     app.register_blueprint(watchlist_bp)
     app.register_blueprint(admin_bp)
     app.register_blueprint(news_bp)
     app.register_blueprint(fundamentals_bp)
+    app.register_blueprint(pattern_bp)
+    app.register_blueprint(ops_bp)
 
 
 def _register_cli(app):
@@ -122,6 +129,7 @@ def _register_cli(app):
 
 
 def create_app(config=None):
+    configure_logging()
     app = Flask(__name__)
     if isinstance(config, dict):
         app.config.from_object(get_config(None))
@@ -156,6 +164,17 @@ def create_app(config=None):
 
     _register_blueprints(app)
     _register_cli(app)
+
+    with app.app_context():
+        from backend.services.patternDetection.yoloService import initialize_yolo_service
+
+        initialize_yolo_service(app.config.get("YOLO_MODEL_PATH"))
+
+    if app.config.get("ENABLE_SCAN_TEMPLATE_SCHEDULER"):
+        with app.app_context():
+            from backend.services.scan_templates import ensure_template_sweep_scheduled
+
+            ensure_template_sweep_scheduled()
 
     if app.config.get("AUTO_CREATE_SCHEMA"):
         with app.app_context():

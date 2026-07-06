@@ -1,5 +1,9 @@
-import React, { memo, useEffect, useMemo, useRef } from 'react';
+import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createChart, CrosshairMode } from 'lightweight-charts';
+import { AlertTriangle, Camera, Loader2 } from 'lucide-react';
+import { patternAPI } from '../../services/api';
+
+const PATTERN_DISCLAIMER = 'Pattern detection is for research only and does not constitute financial advice.';
 
 const EMA_COLORS = {
   ema_9: '#f59e0b',
@@ -23,8 +27,18 @@ const LINE_OPTIONS = {
   crosshairMarkerVisible: false,
 };
 
-const CandlestickChart = memo(function CandlestickChart({ data, height = 400, indicators = {} }) {
+const CandlestickChart = memo(function CandlestickChart({
+  data,
+  height = 400,
+  indicators = {},
+  symbol,
+  timeframe,
+  canDetectPatterns = true,
+  onPatternAuthRequired,
+}) {
   const containerRef = useRef(null);
+  const chartShellRef = useRef(null);
+  const patternCanvasRef = useRef(null);
   const chartRef = useRef(null);
   const candleSeriesRef = useRef(null);
   const volumeSeriesRef = useRef(null);
@@ -32,6 +46,9 @@ const CandlestickChart = memo(function CandlestickChart({ data, height = 400, in
   const volumeDataRef = useRef([]);
   const overlaySeriesRef = useRef(new Map());
   const overlayDataRef = useRef(new Map());
+  const [patternResult, setPatternResult] = useState(null);
+  const [patternError, setPatternError] = useState(null);
+  const [isDetectingPattern, setIsDetectingPattern] = useState(false);
 
   const chartData = useMemo(() => {
     if (!data || data.length === 0) return [];
@@ -58,6 +75,59 @@ const CandlestickChart = memo(function CandlestickChart({ data, height = 400, in
   const hasData = chartData.length > 0;
   const showEma = Boolean(indicators?.ema);
   const showBollingerBands = Boolean(indicators?.bollinger_bands?.upper);
+
+  const clearPatternOverlay = useCallback(() => {
+    const canvas = patternCanvasRef.current;
+    if (!canvas) return;
+    const context = canvas.getContext('2d');
+    context?.clearRect(0, 0, canvas.width, canvas.height);
+  }, []);
+
+  const drawPatternOverlay = useCallback(() => {
+    const canvas = patternCanvasRef.current;
+    const shell = chartShellRef.current;
+    if (!canvas || !shell) return;
+
+    const rect = shell.getBoundingClientRect();
+    const width = Math.max(1, Math.round(rect.width));
+    const height = Math.max(1, Math.round(rect.height));
+    if (canvas.width !== width) canvas.width = width;
+    if (canvas.height !== height) canvas.height = height;
+
+    const context = canvas.getContext('2d');
+    if (!context) return;
+    context.clearRect(0, 0, width, height);
+
+    const boxes = patternResult?.bounding_boxes || [];
+    if (!patternResult?.signal_priority || boxes.length === 0) return;
+
+    const captureWidth = patternResult.capture_size?.width || width;
+    const captureHeight = patternResult.capture_size?.height || height;
+    const scaleX = width / captureWidth;
+    const scaleY = height / captureHeight;
+
+    context.lineWidth = 2;
+    context.strokeStyle = patternResult.source_badge === 'YOLOv8 + TA-Lib' ? '#00d4aa' : '#3b82f6';
+    context.fillStyle = patternResult.source_badge === 'YOLOv8 + TA-Lib'
+      ? 'rgba(0, 212, 170, 0.12)'
+      : 'rgba(59, 130, 246, 0.12)';
+
+    boxes.forEach((box) => {
+      const [x1, y1, x2, y2] = box;
+      const x = x1 * scaleX;
+      const y = y1 * scaleY;
+      const boxWidth = (x2 - x1) * scaleX;
+      const boxHeight = (y2 - y1) * scaleY;
+      context.fillRect(x, y, boxWidth, boxHeight);
+      context.strokeRect(x, y, boxWidth, boxHeight);
+    });
+  }, [patternResult]);
+
+  useEffect(() => {
+    setPatternResult(null);
+    setPatternError(null);
+    clearPatternOverlay();
+  }, [clearPatternOverlay, data, symbol, timeframe]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -138,6 +208,47 @@ const CandlestickChart = memo(function CandlestickChart({ data, height = 400, in
   }, [hasData, height]);
 
   useEffect(() => {
+    drawPatternOverlay();
+  }, [drawPatternOverlay]);
+
+  useEffect(() => {
+    window.addEventListener('resize', drawPatternOverlay);
+    return () => window.removeEventListener('resize', drawPatternOverlay);
+  }, [drawPatternOverlay]);
+
+  const handleDetectPatterns = useCallback(async () => {
+    if (!canDetectPatterns) {
+      onPatternAuthRequired?.();
+      return;
+    }
+
+    setIsDetectingPattern(true);
+    setPatternError(null);
+
+    try {
+      const capture = captureVisibleChart(containerRef.current);
+      const { data: response } = await patternAPI.detect({
+        image: capture.image,
+        symbol,
+        timeframe,
+      });
+
+      setPatternResult({
+        ...response,
+        capture_size: { width: capture.width, height: capture.height },
+      });
+    } catch (error) {
+      const payload = error.response?.data;
+      const message = payload?.error || error.message || 'Pattern detection failed';
+      setPatternError(message);
+      setPatternResult(payload?.signal_priority === null ? { ...payload, bounding_boxes: [] } : null);
+      clearPatternOverlay();
+    } finally {
+      setIsDetectingPattern(false);
+    }
+  }, [canDetectPatterns, clearPatternOverlay, onPatternAuthRequired, symbol, timeframe]);
+
+  useEffect(() => {
     if (!hasData || !candleSeriesRef.current || !volumeSeriesRef.current) return;
 
     candleDataRef.current = updateSeriesData(candleSeriesRef.current, candleDataRef.current, chartData);
@@ -212,8 +323,137 @@ const CandlestickChart = memo(function CandlestickChart({ data, height = 400, in
     );
   }
 
-  return <div ref={containerRef} className="chart-container rounded-xl overflow-hidden" />;
+  return (
+    <div ref={chartShellRef} className="relative rounded-xl overflow-hidden bg-scanner-bg" style={{ height }}>
+      <div ref={containerRef} className="chart-container h-full" />
+      <canvas
+        ref={patternCanvasRef}
+        className="absolute inset-0 z-10 h-full w-full pointer-events-none"
+        aria-hidden="true"
+      />
+      <div className="absolute right-3 top-3 z-20 flex items-center gap-2">
+        <button
+          type="button"
+          onClick={handleDetectPatterns}
+          disabled={isDetectingPattern}
+          className="inline-flex h-9 items-center gap-2 rounded-lg border border-scanner-border bg-scanner-surface/95 px-3 text-xs font-semibold text-scanner-text shadow-scanner-sm transition-colors hover:border-scanner-accent/60 hover:text-scanner-accent disabled:cursor-wait disabled:opacity-70"
+        >
+          {isDetectingPattern ? <Loader2 size={14} className="animate-spin" /> : <Camera size={14} />}
+          Detect Patterns
+        </button>
+      </div>
+
+      <PatternDetectionStatus result={patternResult} error={patternError} />
+    </div>
+  );
 });
+
+function captureVisibleChart(container) {
+  if (!container) {
+    throw new Error('Chart is not ready yet');
+  }
+
+  const rect = container.getBoundingClientRect();
+  const width = Math.max(1, Math.round(rect.width));
+  const height = Math.max(1, Math.round(rect.height));
+  const chartCanvases = Array.from(container.querySelectorAll('canvas')).filter(
+    canvas => canvas.width > 0 && canvas.height > 0
+  );
+
+  if (chartCanvases.length === 0) {
+    throw new Error('Chart image is not ready yet');
+  }
+
+  const output = document.createElement('canvas');
+  output.width = width;
+  output.height = height;
+  const context = output.getContext('2d');
+  if (!context) {
+    throw new Error('Chart image could not be captured');
+  }
+
+  context.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--color-bg').trim() || '#0a0e17';
+  context.fillRect(0, 0, width, height);
+
+  chartCanvases.forEach((canvas) => {
+    const canvasRect = canvas.getBoundingClientRect();
+    const drawX = canvasRect.left - rect.left;
+    const drawY = canvasRect.top - rect.top;
+    context.drawImage(
+      canvas,
+      0,
+      0,
+      canvas.width,
+      canvas.height,
+      drawX,
+      drawY,
+      canvasRect.width,
+      canvasRect.height
+    );
+  });
+
+  return {
+    image: output.toDataURL('image/jpeg', 0.92),
+    width,
+    height,
+  };
+}
+
+function PatternDetectionStatus({ result, error }) {
+  if (error) {
+    return (
+      <div className="absolute bottom-3 left-3 z-20 max-w-[calc(100%-1.5rem)] rounded-lg border border-scanner-danger/30 bg-scanner-surface/95 px-3 py-2 text-xs text-scanner-danger shadow-scanner-sm">
+        <div>{error}</div>
+        <div className="mt-1 text-[10px] leading-snug text-scanner-text-dim">{PATTERN_DISCLAIMER}</div>
+      </div>
+    );
+  }
+
+  if (!result) return null;
+
+  if (result.signal_priority === null) {
+    return (
+      <div className="absolute bottom-3 left-3 z-20 rounded-lg border border-scanner-border bg-scanner-surface/95 px-3 py-2 text-xs text-scanner-text-dim shadow-scanner-sm">
+        <div>No pattern detected above threshold</div>
+        <div className="mt-1 text-[10px] leading-snug">{PATTERN_DISCLAIMER}</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="absolute bottom-3 left-3 z-20 max-w-[calc(100%-1.5rem)] rounded-lg border border-scanner-border bg-scanner-surface/95 px-3 py-2 shadow-scanner-sm">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${sourceBadgeClass(result.source_badge)}`}>
+          {result.source_badge}
+        </span>
+        {result.talib_conflict && (
+          <AlertTriangle
+            size={15}
+            className="text-scanner-warning"
+            title="TA-Lib detected a different pattern"
+          />
+        )}
+      </div>
+      <div className="mt-1 text-sm font-semibold text-scanner-text">
+        {result.pattern || 'Pattern'} <span className="font-mono text-xs text-scanner-text-dim">{formatConfidence(result.confidence)}</span>
+      </div>
+      <div className="mt-1 text-[10px] leading-snug text-scanner-text-dim">{PATTERN_DISCLAIMER}</div>
+    </div>
+  );
+}
+
+function sourceBadgeClass(sourceBadge) {
+  if (sourceBadge === 'YOLOv8 + TA-Lib') {
+    return 'border-scanner-bullish/40 bg-scanner-bullish/10 text-scanner-bullish';
+  }
+  return 'border-blue-400/40 bg-blue-400/10 text-blue-300';
+}
+
+function formatConfidence(confidence) {
+  if (confidence == null) return '';
+  const percent = confidence <= 1 ? confidence * 100 : confidence;
+  return `${Math.round(percent)}%`;
+}
 
 function ensureLineSeries(chart, seriesMap, key, options) {
   const existingSeries = seriesMap.get(key);

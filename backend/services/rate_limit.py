@@ -28,7 +28,10 @@ def wait_for_rate_limit(name, limit, window_seconds):
             wait_seconds = client.ttl(key)
             if wait_seconds is None or wait_seconds < 1:
                 wait_seconds = int(window_seconds)
-            logger.info("Rate limit reached for %s; waiting %ss", name, wait_seconds)
+            logger.info(
+                "rate_limit_wait",
+                extra={"name": name, "wait_seconds": wait_seconds, "window_seconds": window_seconds},
+            )
             time.sleep(wait_seconds)
         except RedisError as exc:
             logger.warning("Redis rate limit failed for %s: %s", name, exc)

@@ -34,6 +34,38 @@ class ScanRequest(ApiModel):
         return value
 
 
+class ScanTemplateCreateRequest(ApiModel):
+    name: str = Field(min_length=1, max_length=120)
+    market: str = Field(default="stocks", max_length=20)
+    timeframe: str = Field(default="1D", max_length=10)
+    filters: list[str] = Field(min_length=1, max_length=25)
+    limit: int = Field(default=30, ge=1, le=50)
+
+    @field_validator("name")
+    @classmethod
+    def normalize_name(cls, value):
+        value = value.strip()
+        if not value:
+            raise ValueError("Template name is required")
+        return value
+
+    @field_validator("market")
+    @classmethod
+    def validate_market(cls, value):
+        value = value.lower().strip()
+        if value not in VALID_MARKETS:
+            raise ValueError("Invalid market")
+        return value
+
+    @field_validator("timeframe")
+    @classmethod
+    def validate_timeframe(cls, value):
+        value = normalize_timeframe(value)
+        if value not in VALID_TIMEFRAMES:
+            raise ValueError("Invalid timeframe")
+        return value
+
+
 class SearchQuery(ApiModel):
     q: str = Field(default="", max_length=50)
     market: str = Field(default="stocks", max_length=20)

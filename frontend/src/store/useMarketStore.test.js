@@ -16,10 +16,22 @@ const apiMocks = vi.hoisted(() => ({
     update: vi.fn(),
     remove: vi.fn(),
   },
+  scanTemplateAPI: {
+    get: vi.fn(),
+    create: vi.fn(),
+    remove: vi.fn(),
+    evaluate: vi.fn(),
+  },
+  notificationAPI: {
+    get: vi.fn(),
+    markRead: vi.fn(),
+  },
 }))
 
 vi.mock('../services/api', () => ({
   marketAPI: apiMocks.marketAPI,
+  notificationAPI: apiMocks.notificationAPI,
+  scanTemplateAPI: apiMocks.scanTemplateAPI,
   watchlistAPI: apiMocks.watchlistAPI,
 }))
 
@@ -49,6 +61,13 @@ const resetMarketStore = () => {
     isSearching: false,
     watchlist: [],
     isLoadingWatchlist: false,
+    scanTemplates: [],
+    isSavingScanTemplate: false,
+    scanTemplateError: null,
+    notifications: [],
+    unreadNotificationCount: 0,
+    isLoadingNotifications: false,
+    notificationError: null,
     isConnected: false,
     apiStatus: null,
   })
@@ -88,6 +107,55 @@ describe('watchlist store', () => {
 
     expect(apiMocks.watchlistAPI.remove).toHaveBeenCalledWith(7)
     await waitFor(() => expect(apiMocks.watchlistAPI.get).toHaveBeenCalledTimes(2))
+  })
+})
+
+describe('scan template and notification store', () => {
+  beforeEach(resetMarketStore)
+
+  it('saves the current scan filters as a template', async () => {
+    apiMocks.scanTemplateAPI.create.mockResolvedValue({
+      data: {
+        template: {
+          id: 3,
+          name: 'Bounce watch',
+          criteria: { market: 'crypto', timeframe: '1D', filters: ['rsi_oversold'], limit: 30 },
+        },
+      },
+    })
+    useMarketStore.setState({ activeMarket: 'crypto', timeframe: '1D', selectedFilters: ['rsi_oversold'] })
+
+    await useMarketStore.getState().saveScanTemplate('Bounce watch')
+
+    expect(apiMocks.scanTemplateAPI.create).toHaveBeenCalledWith({
+      name: 'Bounce watch',
+      market: 'crypto',
+      timeframe: '1D',
+      filters: ['rsi_oversold'],
+      limit: 30,
+    })
+    expect(useMarketStore.getState().scanTemplates[0].name).toBe('Bounce watch')
+  })
+
+  it('loads notifications and marks one read', async () => {
+    apiMocks.notificationAPI.get.mockResolvedValue({
+      data: {
+        unread_count: 1,
+        notifications: [{ id: 9, title: 'AAPL matched', message: 'AAPL matched', is_read: false }],
+      },
+    })
+    apiMocks.notificationAPI.markRead.mockResolvedValue({
+      data: {
+        notification: { id: 9, title: 'AAPL matched', message: 'AAPL matched', is_read: true },
+      },
+    })
+
+    await useMarketStore.getState().loadNotifications()
+    await useMarketStore.getState().markNotificationRead(9)
+
+    expect(apiMocks.notificationAPI.markRead).toHaveBeenCalledWith(9)
+    expect(useMarketStore.getState().unreadNotificationCount).toBe(0)
+    expect(useMarketStore.getState().notifications[0].is_read).toBe(true)
   })
 })
 

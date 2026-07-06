@@ -76,6 +76,18 @@ You should see:
 
 ---
 
+### YOLOv8 Chart Pattern Model
+
+Download `model.pt` from https://huggingface.co/foduucom/stockmarket-pattern-detection-yolov8 and place it at:
+
+```text
+models/yolov8/model.pt
+```
+
+The backend loads this model once at app startup. The browser captures/crops chart imagery on the client and sends image data to the backend; the YOLO service accepts a decoded numpy/OpenCV image buffer, not server-side screen capture.
+
+---
+
 ### Step 2: Frontend Setup
 
 Open a **second terminal** in VS Code:

@@ -52,6 +52,22 @@ export const marketAPI = {
   getStockDetail: (symbol, timeframe) => api.get(`/stock/${symbol}`, { params: { timeframe }, timeout: 120000 }),
 }
 
+export const patternAPI = {
+  detect: (data) => api.post('/patterns/detect', data, { timeout: 120000 }),
+}
+
+export const scanTemplateAPI = {
+  get: () => api.get('/scan/templates'),
+  create: (data) => api.post('/scan/templates', data),
+  remove: (id) => api.delete(`/scan/templates/${id}`),
+  evaluate: (id) => api.post(`/scan/templates/${id}/evaluate`, {}, { timeout: 600000 }),
+}
+
+export const notificationAPI = {
+  get: () => api.get('/notifications'),
+  markRead: (id) => api.patch(`/notifications/${id}/read`),
+}
+
 export const newsAPI = {
   getNews: (symbol, params = {}) => api.get(`/news/${symbol}`, { params, timeout: 60000 }),
 }

@@ -24,13 +24,13 @@ class SentimentAnalyzer:
         """Try to load FinBERT model. Falls back to lexicon if unavailable."""
         try:
             from transformers import AutoTokenizer, AutoModelForSequenceClassification
-            logger.info("Loading FinBERT model (first run may download ~500MB)...")
             model_name = "ProsusAI/finbert"
+            logger.info("finbert_loading", extra={"model": model_name})
             self.tokenizer = AutoTokenizer.from_pretrained(model_name)
             self.model = AutoModelForSequenceClassification.from_pretrained(model_name)
             self.model.eval()
             self.use_finbert = True
-            logger.info("✓ FinBERT loaded successfully")
+            logger.info("finbert_loaded", extra={"model": model_name})
         except ImportError:
             logger.warning("transformers/torch not installed. Using lexicon-based sentiment.")
             logger.warning("To enable FinBERT: pip install transformers torch --break-system-packages")
@@ -396,37 +396,40 @@ class NewsAggregator:
         # Polygon (primary - always available with API key)
         polygon_articles = self._fetch_polygon(symbol, limit=limit)
         all_articles.extend(polygon_articles)
-        logger.info(f"News sources - Polygon: {len(polygon_articles)} articles")
+        logger.info("news_source_fetched", extra={"source": "polygon", "article_count": len(polygon_articles)})
 
         # Finnhub (if API key configured)
         finnhub_articles = self._fetch_finnhub(symbol, days=days)
         all_articles.extend(finnhub_articles)
         if finnhub_articles:
-            logger.info(f"News sources - Finnhub: {len(finnhub_articles)} articles")
+            logger.info("news_source_fetched", extra={"source": "finnhub", "article_count": len(finnhub_articles)})
 
         # Alpha Vantage (if API key configured)
         av_articles = self._fetch_alpha_vantage(symbol, limit=20)
         all_articles.extend(av_articles)
         if av_articles:
-            logger.info(f"News sources - Alpha Vantage: {len(av_articles)} articles")
+            logger.info("news_source_fetched", extra={"source": "alpha_vantage", "article_count": len(av_articles)})
 
         # RSS feeds (always free, no API key needed)
         yahoo_articles = self._fetch_yahoo_rss(symbol)
         all_articles.extend(yahoo_articles)
-        logger.info(f"News sources - Yahoo RSS: {len(yahoo_articles)} articles")
+        logger.info("news_source_fetched", extra={"source": "yahoo_rss", "article_count": len(yahoo_articles)})
 
         google_articles = self._fetch_google_rss(symbol, company_name)
         all_articles.extend(google_articles)
-        logger.info(f"News sources - Google RSS: {len(google_articles)} articles")
+        logger.info("news_source_fetched", extra={"source": "google_rss", "article_count": len(google_articles)})
 
         mw_articles = self._fetch_marketwatch_rss(symbol)
         all_articles.extend(mw_articles)
         if mw_articles:
-            logger.info(f"News sources - MarketWatch RSS: {len(mw_articles)} articles")
+            logger.info("news_source_fetched", extra={"source": "marketwatch_rss", "article_count": len(mw_articles)})
 
         # Deduplicate
         unique_articles = self._deduplicate(all_articles)
-        logger.info(f"News total: {len(all_articles)} raw → {len(unique_articles)} after dedup")
+        logger.info(
+            "news_deduplicated",
+            extra={"raw_article_count": len(all_articles), "unique_article_count": len(unique_articles)},
+        )
 
         # Sort by date (newest first)
         def parse_date(article):

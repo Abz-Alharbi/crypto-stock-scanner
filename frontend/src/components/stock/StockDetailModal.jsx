@@ -7,7 +7,7 @@ import LoadingSpinner from '../common/LoadingSpinner';
 
 export default function StockDetailModal() {
   const { isDetailOpen, selectedSymbol, selectedProviderSymbol, stockDetail, chartData, isLoadingDetail, isLoadingChart, detailError, watchlistError, closeDetail, changeDetailTimeframe, timeframe, timeframes, addToWatchlist, activeMarket } = useMarketStore();
-  const { isAuthenticated } = useAuthStore();
+  const { isAuthenticated, setAuthModal } = useAuthStore();
   const [activeTab, setActiveTab] = useState('indicators');
 
   const analysis = stockDetail?.analysis;
@@ -144,7 +144,15 @@ export default function StockDetailModal() {
                 {isLoadingChart ? (
                   <div className="h-[400px] flex items-center justify-center"><LoadingSpinner text="Loading chart..." /></div>
                 ) : (
-                  <CandlestickChart data={chartData} height={400} indicators={chartIndicators} />
+                  <CandlestickChart
+                    data={chartData}
+                    height={400}
+                    indicators={chartIndicators}
+                    symbol={selectedProviderSymbol || selectedSymbol}
+                    timeframe={timeframe}
+                    canDetectPatterns={isAuthenticated}
+                    onPatternAuthRequired={() => setAuthModal(true, 'login')}
+                  />
                 )}
               </div>
 
@@ -456,7 +464,7 @@ export default function StockDetailModal() {
           {/* Disclaimer */}
           <div className="px-5 py-3 border-t border-scanner-border bg-scanner-bg/30">
             <p className="text-[10px] text-scanner-text-dim text-center">
-              ⚠️ This is not financial advice. Technical analysis indicators are for educational and informational purposes only. Always do your own research before making investment decisions.
+              Pattern detection is for research only and does not constitute financial advice.
             </p>
           </div>
         </div>

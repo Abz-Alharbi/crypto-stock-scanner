@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { AlertCircle, Filter, Zap, ChevronDown, ChevronRight, X, Play, RotateCcw } from 'lucide-react';
+import { AlertCircle, Filter, Zap, ChevronDown, ChevronRight, Play, RotateCcw, Save } from 'lucide-react';
 import useMarketStore from '../../store/useMarketStore';
+import useAuthStore from '../../store/useAuthStore';
 
 const CATEGORY_LABELS = {
   oscillators: { label: 'Oscillators', icon: '📊', color: 'text-blue-400' },
@@ -13,10 +14,13 @@ const CATEGORY_LABELS = {
 export default function FilterPanel() {
   const {
     filterDefinitions, filterPresets, selectedFilters, timeframe, timeframes,
-    filterError, toggleFilter, setFiltersFromPreset, clearFilters, setTimeframe, runScan, isScanning
+    filterError, scanTemplateError, isSavingScanTemplate,
+    toggleFilter, setFiltersFromPreset, clearFilters, setTimeframe, runScan, saveScanTemplate, isScanning
   } = useMarketStore();
+  const { isAuthenticated, setAuthModal } = useAuthStore();
 
   const [expandedCats, setExpandedCats] = useState(new Set(['oscillators', 'moving_averages']));
+  const [templateName, setTemplateName] = useState('');
   const timeframeOptions = Object.entries(timeframes || {}).map(([key, config]) => ({
     key,
     label: config.label || key,
@@ -28,6 +32,18 @@ export default function FilterPanel() {
     const next = new Set(expandedCats);
     next.has(cat) ? next.delete(cat) : next.add(cat);
     setExpandedCats(next);
+  };
+
+  const handleSaveTemplate = async (event) => {
+    event.preventDefault();
+    if (!isAuthenticated) {
+      setAuthModal(true, 'login');
+      return;
+    }
+    const name = templateName.trim();
+    if (!name) return;
+    await saveScanTemplate(name);
+    setTemplateName('');
   };
 
   return (
@@ -101,6 +117,35 @@ export default function FilterPanel() {
           ))}
         </div>
       </div>
+
+      {/* Save Template */}
+      <form onSubmit={handleSaveTemplate} className="px-4 py-3 border-b border-scanner-border space-y-2">
+        <label className="block text-[10px] font-medium text-scanner-text-dim uppercase tracking-widest">
+          <Save size={10} className="inline mr-1" />Save Template
+        </label>
+        <div className="flex gap-2">
+          <input
+            value={templateName}
+            onChange={(event) => setTemplateName(event.target.value)}
+            maxLength={120}
+            placeholder="Name this scan"
+            className="min-w-0 flex-1 rounded-lg border border-scanner-border bg-scanner-bg px-3 py-2 text-xs text-scanner-text placeholder-scanner-text-dim focus:border-scanner-accent/50 focus:outline-none"
+          />
+          <button
+            type="submit"
+            disabled={isSavingScanTemplate || selectedFilters.length === 0 || !templateName.trim()}
+            className="flex items-center justify-center rounded-lg bg-scanner-card px-3 py-2 text-xs font-semibold text-scanner-text-dim hover:text-scanner-accent disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {isSavingScanTemplate ? 'Saving' : 'Save'}
+          </button>
+        </div>
+        {scanTemplateError && (
+          <div className="flex items-center gap-2 rounded-lg border border-scanner-danger/30 bg-scanner-danger/10 px-3 py-2 text-xs text-scanner-danger">
+            <AlertCircle size={14} />
+            <span>{scanTemplateError}</span>
+          </div>
+        )}
+      </form>
 
       {/* Filter Categories */}
       <div className="max-h-[400px] overflow-y-auto">

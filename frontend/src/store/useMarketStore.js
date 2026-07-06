@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import toast from 'react-hot-toast';
-import { marketAPI, watchlistAPI } from '../services/api';
+import { marketAPI, notificationAPI, scanTemplateAPI, watchlistAPI } from '../services/api';
 
 let searchAbortController = null;
 
@@ -41,6 +41,17 @@ const useMarketStore = create((set, get) => ({
   watchlist: [],
   isLoadingWatchlist: false,
   watchlistError: null,
+
+  // Scan templates
+  scanTemplates: [],
+  isSavingScanTemplate: false,
+  scanTemplateError: null,
+
+  // Notifications
+  notifications: [],
+  unreadNotificationCount: 0,
+  isLoadingNotifications: false,
+  notificationError: null,
 
   // Connection
   isConnected: false,
@@ -283,6 +294,77 @@ const useMarketStore = create((set, get) => ({
     } catch (err) {
       const message = err.response?.data?.error || err.message || 'Failed to remove from watchlist';
       set({ watchlistError: message });
+    }
+  },
+
+  loadScanTemplates: async () => {
+    try {
+      const { data } = await scanTemplateAPI.get();
+      set({ scanTemplates: data.templates || [], scanTemplateError: null });
+    } catch (err) {
+      const message = err.response?.data?.error || err.message || 'Failed to load scan templates';
+      set({ scanTemplateError: message });
+    }
+  },
+
+  saveScanTemplate: async (name) => {
+    const { selectedFilters, activeMarket, timeframe } = get();
+    if (selectedFilters.length === 0) {
+      set({ scanTemplateError: 'Select at least one filter before saving a template' });
+      return;
+    }
+
+    set({ isSavingScanTemplate: true, scanTemplateError: null });
+    try {
+      const { data } = await scanTemplateAPI.create({
+        name,
+        market: activeMarket,
+        timeframe,
+        filters: selectedFilters,
+        limit: 30,
+      });
+      set({
+        scanTemplates: [data.template, ...get().scanTemplates],
+        isSavingScanTemplate: false,
+        scanTemplateError: null,
+      });
+      toast.success('Scan template saved');
+    } catch (err) {
+      const message = err.response?.data?.error || err.message || 'Failed to save scan template';
+      set({ isSavingScanTemplate: false, scanTemplateError: message });
+    }
+  },
+
+  loadNotifications: async () => {
+    set({ isLoadingNotifications: true });
+    try {
+      const { data } = await notificationAPI.get();
+      set({
+        notifications: data.notifications || [],
+        unreadNotificationCount: data.unread_count || 0,
+        isLoadingNotifications: false,
+        notificationError: null,
+      });
+    } catch (err) {
+      const message = err.response?.data?.error || err.message || 'Failed to load notifications';
+      set({ isLoadingNotifications: false, notificationError: message });
+    }
+  },
+
+  markNotificationRead: async (id) => {
+    try {
+      const previous = get().notifications.find(item => item.id === id);
+      const wasUnread = previous && !previous.is_read;
+      const { data } = await notificationAPI.markRead(id);
+      const updated = data.notification;
+      set({
+        notifications: get().notifications.map(item => (item.id === id ? updated : item)),
+        unreadNotificationCount: Math.max(0, get().unreadNotificationCount - (wasUnread ? 1 : 0)),
+        notificationError: null,
+      });
+    } catch (err) {
+      const message = err.response?.data?.error || err.message || 'Failed to update notification';
+      set({ notificationError: message });
     }
   },
 }));

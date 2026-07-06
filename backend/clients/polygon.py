@@ -136,13 +136,13 @@ class PolygonClient:
 
         snapshot = index.get(ticker.upper())
         if snapshot is None:
-            logger.info("Skipping %s OHLCV fetch; ticker missing from Polygon snapshot", ticker)
+            logger.info("polygon_ohlcv_skipped", extra={"ticker": ticker, "reason": "missing_snapshot"})
             return False
 
         day = snapshot.get("day") or snapshot.get("prevDay") or {}
         volume = day.get("v") if "v" in day else snapshot.get("volume")
         if volume is not None and float(volume) <= 0:
-            logger.info("Skipping %s OHLCV fetch; snapshot volume is zero", ticker)
+            logger.info("polygon_ohlcv_skipped", extra={"ticker": ticker, "reason": "zero_snapshot_volume"})
             return False
         return True
 

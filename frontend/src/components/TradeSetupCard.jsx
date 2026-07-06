@@ -192,7 +192,7 @@ function TradeSetupBody({ ts, dir }) {
       {/* Disclaimer */}
       <div className="mt-3 px-3 py-2 rounded text-[10px] leading-relaxed"
         style={{ background: 'color-mix(in srgb, var(--color-warning) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--color-warning) 15%, transparent)', color: 'color-mix(in srgb, var(--color-warning) 70%, var(--color-text-dim))' }}>
-        ⚠️ For educational purposes only. Not financial advice. Always do your own research and manage risk accordingly.
+        Pattern detection is for research only and does not constitute financial advice.
       </div>
     </div>
   );

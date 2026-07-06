@@ -207,6 +207,9 @@ export default function ScanResults() {
           </tbody>
         </table>
       </div>
+      <div className="border-t border-scanner-border bg-scanner-bg/30 px-5 py-3 text-center text-[10px] text-scanner-text-dim">
+        Pattern detection is for research only and does not constitute financial advice.
+      </div>
     </div>
   );
 }

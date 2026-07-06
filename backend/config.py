@@ -15,6 +15,18 @@ class BaseConfig:
     DEBUG = False
     TESTING = False
     AUTO_CREATE_SCHEMA = os.getenv("AUTO_CREATE_SCHEMA", "false").lower() == "true"
+    ENABLE_SCAN_TEMPLATE_SCHEDULER = os.getenv("ENABLE_SCAN_TEMPLATE_SCHEDULER", "false").lower() == "true"
+    SCAN_TEMPLATE_EVALUATION_INTERVAL_SECONDS = int(os.getenv("SCAN_TEMPLATE_EVALUATION_INTERVAL_SECONDS", "900"))
+    SCAN_TEMPLATE_INITIAL_DELAY_SECONDS = int(os.getenv("SCAN_TEMPLATE_INITIAL_DELAY_SECONDS", "60"))
+    SMTP_HOST = os.getenv("SMTP_HOST", "")
+    SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+    SMTP_USERNAME = os.getenv("SMTP_USERNAME", "")
+    SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
+    SMTP_FROM = os.getenv("SMTP_FROM", "")
+    SMTP_USE_TLS = os.getenv("SMTP_USE_TLS", "true").lower() == "true"
+    YOLO_MODEL_PATH = os.getenv("YOLO_MODEL_PATH", "models/yolov8/model.pt")
+    YOLO_CONFIDENCE_THRESHOLD = float(os.getenv("YOLO_CONFIDENCE_THRESHOLD", "0.50"))
+    PATTERN_LOG_ROOT = os.getenv("PATTERN_LOG_ROOT", "logs/pattern_detections")
 
 
 class DevelopmentConfig(BaseConfig):

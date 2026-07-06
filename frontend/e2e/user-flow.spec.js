@@ -121,6 +121,10 @@ async function mockApi(page) {
       return json({ watchlist })
     }
 
+    if (path === '/api/notifications' && method === 'GET') {
+      return json({ notifications: [], unread_count: 0 })
+    }
+
     if (path === '/api/admin/stats') {
       return json({ total_users: 1, active_users: 1, total_scans: 1, cache_entries: 0 })
     }

@@ -1,17 +1,32 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Activity, TrendingUp, LogIn, LogOut, User, Settings, Search, Menu, X, BookmarkPlus, Newspaper, PieChart } from 'lucide-react';
+import { Activity, TrendingUp, LogIn, LogOut, Settings, Menu, X, BookmarkPlus, Newspaper, PieChart, Bell } from 'lucide-react';
 import useAuthStore from '../../store/useAuthStore';
 import useMarketStore from '../../store/useMarketStore';
 import ThemeToggle from './ThemeToggle';
 
 export default function Header() {
   const { user, isAuthenticated, logout, setAuthModal } = useAuthStore();
-  const { activeMarket, setMarket, isConnected } = useMarketStore();
+  const {
+    activeMarket,
+    setMarket,
+    isConnected,
+    notifications,
+    unreadNotificationCount,
+    loadNotifications,
+    markNotificationRead,
+  } = useMarketStore();
   const location = useLocation();
   const navigate = useNavigate();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      loadNotifications();
+    }
+  }, [isAuthenticated, loadNotifications]);
 
   const navItems = [
     { key: 'scanner', label: 'Scanner', icon: Activity, path: '/', active: (path) => path === '/' },
@@ -85,6 +100,53 @@ export default function Header() {
           {/* Theme Toggle + Auth + Mobile menu */}
           <div className="flex items-center gap-2">
             <ThemeToggle />
+
+            {isAuthenticated && (
+              <div className="relative">
+                <button
+                  onClick={() => setNotificationsOpen(!notificationsOpen)}
+                  className="relative p-2 rounded-lg bg-scanner-card border border-scanner-border hover:border-scanner-accent/30 text-scanner-text-dim hover:text-scanner-accent transition-all"
+                  title="Notifications"
+                  aria-label="Notifications"
+                >
+                  <Bell size={16} />
+                  {unreadNotificationCount > 0 && (
+                    <span className="absolute -top-1 -right-1 min-w-4 h-4 px-1 rounded-full bg-scanner-danger text-[9px] font-bold text-white flex items-center justify-center">
+                      {unreadNotificationCount}
+                    </span>
+                  )}
+                </button>
+
+                {notificationsOpen && (
+                  <div className="absolute right-0 mt-2 w-80 max-w-[calc(100vw-2rem)] bg-scanner-card border border-scanner-border rounded-xl shadow-2xl py-2 animate-slide-down">
+                    <div className="px-4 py-2 border-b border-scanner-border">
+                      <p className="text-xs font-semibold uppercase tracking-widest text-scanner-text-dim">Notifications</p>
+                    </div>
+                    <div className="max-h-80 overflow-y-auto">
+                      {notifications.length === 0 ? (
+                        <p className="px-4 py-6 text-center text-sm text-scanner-text-dim">No notifications yet.</p>
+                      ) : notifications.map((notification) => (
+                        <button
+                          key={notification.id}
+                          onClick={() => markNotificationRead(notification.id)}
+                          className={`w-full px-4 py-3 text-left border-b border-scanner-border/50 last:border-b-0 hover:bg-scanner-bg/50 transition-colors ${
+                            notification.is_read ? 'opacity-70' : ''
+                          }`}
+                        >
+                          <div className="flex items-start gap-2">
+                            {!notification.is_read && <span className="mt-1.5 h-2 w-2 rounded-full bg-scanner-accent flex-shrink-0" />}
+                            <div className="min-w-0">
+                              <p className="text-sm font-medium text-scanner-text truncate">{notification.title}</p>
+                              <p className="mt-1 text-xs text-scanner-text-dim line-clamp-2">{notification.message}</p>
+                            </div>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             {isAuthenticated ? (
               <div className="relative">
