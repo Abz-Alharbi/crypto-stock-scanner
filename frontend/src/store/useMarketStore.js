@@ -1,5 +1,8 @@
 import { create } from 'zustand';
+import toast from 'react-hot-toast';
 import { marketAPI, watchlistAPI } from '../services/api';
+
+let searchAbortController = null;
 
 const useMarketStore = create((set, get) => ({
   // Market selection
@@ -11,6 +14,7 @@ const useMarketStore = create((set, get) => ({
   timeframes: {},
   selectedFilters: [],
   timeframe: '1D',
+  filterError: null,
 
   // Scan state
   scanResults: [],
@@ -27,6 +31,7 @@ const useMarketStore = create((set, get) => ({
   isDetailOpen: false,
   isLoadingDetail: false,
   isLoadingChart: false,
+  detailError: null,
 
   // Search
   searchResults: [],
@@ -35,6 +40,7 @@ const useMarketStore = create((set, get) => ({
   // Watchlist
   watchlist: [],
   isLoadingWatchlist: false,
+  watchlistError: null,
 
   // Connection
   isConnected: false,
@@ -44,7 +50,11 @@ const useMarketStore = create((set, get) => ({
 
   setMarket: (market) => set({ activeMarket: market }),
 
-  setTimeframe: (tf) => set({ timeframe: tf }),
+  setTimeframe: (tf) => {
+    const config = get().timeframes?.[tf];
+    if (config?.available === false) return;
+    set({ timeframe: tf });
+  },
 
   toggleFilter: (filterKey) => {
     const current = get().selectedFilters;
@@ -82,24 +92,39 @@ const useMarketStore = create((set, get) => ({
         filterDefinitions: data.filters,
         filterPresets: data.presets,
         timeframes: data.timeframes || {},
+        filterError: null,
       });
     } catch (err) {
-      console.error('Failed to load filters:', err);
+      const message = err.response?.data?.error || err.message || 'Failed to load filters';
+      set({ filterError: message });
     }
   },
 
   // Search tickers
   searchTickers: async (query) => {
+    searchAbortController?.abort();
+
     if (!query || query.length < 1) {
-      set({ searchResults: [] });
+      searchAbortController = null;
+      set({ searchResults: [], isSearching: false });
       return;
     }
+
+    const controller = new AbortController();
+    searchAbortController = controller;
     set({ isSearching: true });
+
     try {
-      const { data } = await marketAPI.search(query, get().activeMarket);
+      const { data } = await marketAPI.search(query, get().activeMarket, { signal: controller.signal });
+      if (searchAbortController !== controller) return;
       set({ searchResults: data.results, isSearching: false });
-    } catch {
+    } catch (err) {
+      if (controller.signal.aborted || err.code === 'ERR_CANCELED') return;
       set({ searchResults: [], isSearching: false });
+    } finally {
+      if (searchAbortController === controller) {
+        searchAbortController = null;
+      }
     }
   },
 
@@ -163,6 +188,7 @@ const useMarketStore = create((set, get) => ({
       isLoadingChart: true,
       stockDetail: null,
       chartData: [],
+      detailError: null,
     });
 
     try {
@@ -176,16 +202,18 @@ const useMarketStore = create((set, get) => ({
         isLoadingChart: false,
       });
     } catch (err) {
-      console.error('Failed to load detail:', err);
-      set({ isLoadingDetail: false, isLoadingChart: false });
+      const message = err.response?.data?.error || err.message || 'Failed to load detail';
+      set({ detailError: message, isLoadingDetail: false, isLoadingChart: false });
     }
   },
 
-  closeDetail: () => set({ isDetailOpen: false, selectedSymbol: null, selectedProviderSymbol: null, stockDetail: null, chartData: [] }),
+  closeDetail: () => set({ isDetailOpen: false, selectedSymbol: null, selectedProviderSymbol: null, stockDetail: null, chartData: [], detailError: null }),
 
   // Change timeframe for detail view
   changeDetailTimeframe: async (tf) => {
     const { selectedSymbol, selectedProviderSymbol } = get();
+    const config = get().timeframes?.[tf];
+    if (config?.available === false) return;
     const providerSymbol = selectedProviderSymbol || selectedSymbol;
     if (!providerSymbol) return;
     set({ timeframe: tf, isLoadingChart: true });
@@ -198,9 +226,11 @@ const useMarketStore = create((set, get) => ({
         stockDetail: data,
         chartData: data.chart_data || [],
         isLoadingChart: false,
+        detailError: null,
       });
-    } catch {
-      set({ isLoadingChart: false });
+    } catch (err) {
+      const message = err.response?.data?.error || err.message || 'Failed to load chart';
+      set({ detailError: message, isLoadingChart: false });
     }
   },
 
@@ -209,27 +239,50 @@ const useMarketStore = create((set, get) => ({
     set({ isLoadingWatchlist: true });
     try {
       const { data } = await watchlistAPI.get();
-      set({ watchlist: data.watchlist, isLoadingWatchlist: false });
-    } catch {
-      set({ isLoadingWatchlist: false });
+      set({ watchlist: data.watchlist, isLoadingWatchlist: false, watchlistError: null });
+    } catch (err) {
+      const message = err.response?.data?.error || err.message || 'Failed to load watchlist';
+      set({ isLoadingWatchlist: false, watchlistError: message });
     }
   },
 
   addToWatchlist: async (symbol, market) => {
     try {
       await watchlistAPI.add({ symbol, market });
+      set({ watchlistError: null });
       get().loadWatchlist();
     } catch (err) {
-      console.error('Failed to add to watchlist:', err);
+      const message = err.response?.data?.error || err.message || 'Failed to add to watchlist';
+      if (err.response?.status === 409 || err.response?.data?.code === 'duplicate_symbol') {
+        toast.error(message);
+      }
+      set({ watchlistError: message });
+    }
+  },
+
+  updateWatchlistNotes: async (id, notes) => {
+    try {
+      const { data } = await watchlistAPI.update(id, { notes });
+      const updatedItem = data.watchlist_item;
+      set({
+        watchlist: get().watchlist.map(item => (item.id === id ? updatedItem : item)),
+        watchlistError: null,
+      });
+    } catch (err) {
+      const message = err.response?.data?.error || err.message || 'Failed to update watchlist notes';
+      set({ watchlistError: message });
+      throw err;
     }
   },
 
   removeFromWatchlist: async (id) => {
     try {
       await watchlistAPI.remove(id);
+      set({ watchlistError: null });
       get().loadWatchlist();
     } catch (err) {
-      console.error('Failed to remove from watchlist:', err);
+      const message = err.response?.data?.error || err.message || 'Failed to remove from watchlist';
+      set({ watchlistError: message });
     }
   },
 }));

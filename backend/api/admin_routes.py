@@ -16,9 +16,9 @@ def get_users(_current_user):
 
 @admin_bp.route("/users/<int:user_id>", methods=["PUT"])
 @admin_required
-def update_user(_current_user, user_id):
+def update_user(current_user, user_id):
     data = parse_json(UpdateUserRequest)
-    return jsonify(admin_service.update_user(user_id, data))
+    return jsonify(admin_service.update_user(current_user, user_id, data))
 
 
 @admin_bp.route("/scans", methods=["GET"])
@@ -31,3 +31,9 @@ def get_scans(_current_user):
 @admin_required
 def get_stats(_current_user):
     return jsonify(admin_service.stats())
+
+
+@admin_bp.route("/audit-logs", methods=["GET"])
+@admin_required
+def get_audit_logs(_current_user):
+    return jsonify(admin_service.list_audit_logs())

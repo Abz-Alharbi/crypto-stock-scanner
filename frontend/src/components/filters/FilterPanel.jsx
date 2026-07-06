@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Filter, Zap, ChevronDown, ChevronRight, X, Play, RotateCcw } from 'lucide-react';
+import { AlertCircle, Filter, Zap, ChevronDown, ChevronRight, X, Play, RotateCcw } from 'lucide-react';
 import useMarketStore from '../../store/useMarketStore';
 
 const CATEGORY_LABELS = {
@@ -13,7 +13,7 @@ const CATEGORY_LABELS = {
 export default function FilterPanel() {
   const {
     filterDefinitions, filterPresets, selectedFilters, timeframe, timeframes,
-    toggleFilter, setFiltersFromPreset, clearFilters, setTimeframe, runScan, isScanning
+    filterError, toggleFilter, setFiltersFromPreset, clearFilters, setTimeframe, runScan, isScanning
   } = useMarketStore();
 
   const [expandedCats, setExpandedCats] = useState(new Set(['oscillators', 'moving_averages']));
@@ -59,18 +59,29 @@ export default function FilterPanel() {
           {timeframeOptions.map(tf => (
             <button
               key={tf.key}
-              onClick={() => setTimeframe(tf.key)}
+              onClick={() => tf.available && setTimeframe(tf.key)}
+              disabled={!tf.available}
               className={`flex-1 py-1.5 rounded-md text-xs font-semibold transition-all ${
                 timeframe === tf.key
                   ? 'bg-scanner-accent text-scanner-bg shadow shadow-scanner-accent/30'
+                  : !tf.available
+                    ? 'bg-scanner-bg/40 text-scanner-text-dim/40 border border-dashed border-scanner-border cursor-not-allowed'
                   : 'bg-scanner-bg text-scanner-text-dim hover:text-scanner-text hover:bg-scanner-surface'
               }`}
+              title={!tf.available ? 'Unavailable on the current data plan' : tf.label}
             >
               {tf.shortLabel}
             </button>
           ))}
         </div>
       </div>
+
+      {filterError && (
+        <div className="mx-4 mt-3 flex items-center gap-2 rounded-lg border border-scanner-danger/30 bg-scanner-danger/10 px-3 py-2 text-xs text-scanner-danger">
+          <AlertCircle size={14} />
+          <span>{filterError}</span>
+        </div>
+      )}
 
       {/* Presets */}
       <div className="px-4 py-3 border-b border-scanner-border">

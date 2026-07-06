@@ -94,7 +94,6 @@ def _generate_summary(company, valuation, profitability, growth, health, dividen
 
     # Growth
     rev_growth = growth.get('revenue_growth')
-    earn_growth = growth.get('earnings_growth')
     if rev_growth is not None:
         if rev_growth > 20:
             lines.append(f"Revenue growth of {rev_growth}% year-over-year signals strong business momentum.")
@@ -176,7 +175,6 @@ def get_fundamentals(symbol):
     net_income = _safe_val(inc, 'net_income_loss', default=0)
     gross_profit = _safe_val(inc, 'gross_profit', default=0)
     operating_income = _safe_val(inc, 'operating_income_loss', default=0)
-    cost_of_revenue = _safe_val(inc, 'cost_of_revenue', default=0)
     ebitda = _safe_val(inc, 'income_loss_from_continuing_operations_before_tax', default=0)
     eps_basic = _safe_val(inc, 'basic_earnings_per_share', default=None)
     eps_diluted = _safe_val(inc, 'diluted_earnings_per_share', default=None)

@@ -1,0 +1,5 @@
+[run]
+omit =
+    backend/services/fundamentals.py
+    backend/services/news.py
+    backend/services/technical.py

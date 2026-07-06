@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import {
   Search, Building2, DollarSign, TrendingUp, TrendingDown, BarChart3,
   PieChart, Shield, Coins, FileText, ExternalLink, Loader2, AlertCircle,
@@ -171,14 +172,23 @@ function SummaryCard({ summary, lastFiling }) {
 
 // ── Main Component ────────────────────────────────────────
 export default function FundamentalAnalysis() {
+  const { symbol } = useParams();
+  const navigate = useNavigate();
   const [searchInput, setSearchInput] = useState('');
   const { data, isLoading, error, currentSymbol, fetchFundamentals, reset } = useFundamentalsStore();
 
   const handleSearch = (e) => {
     e.preventDefault();
     const sym = searchInput.trim().toUpperCase();
-    if (sym) fetchFundamentals(sym);
+    if (sym) navigate(`/fundamentals/${encodeURIComponent(sym)}`);
   };
+
+  useEffect(() => {
+    if (!symbol) return;
+    const routeSymbol = symbol.trim().toUpperCase();
+    setSearchInput(routeSymbol);
+    fetchFundamentals(routeSymbol);
+  }, [symbol]);
 
   useEffect(() => () => reset(), []);
 
@@ -248,7 +258,7 @@ export default function FundamentalAnalysis() {
           <div className="flex flex-wrap justify-center gap-2 mt-4">
             {['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'META'].map((sym) => (
               <button key={sym}
-                onClick={() => { setSearchInput(sym); fetchFundamentals(sym); }}
+                onClick={() => navigate(`/fundamentals/${sym}`)}
                 className="px-3 py-1.5 rounded-lg text-xs font-mono font-medium transition-all hover:scale-105"
                 style={{ background: 'var(--color-surface)', color: 'var(--color-accent)', border: '1px solid var(--color-border)' }}>
                 {sym}

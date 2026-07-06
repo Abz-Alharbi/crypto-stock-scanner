@@ -39,3 +39,13 @@ def remove_watchlist_item(user, item_id):
     db.session.delete(item)
     db.session.commit()
     return {"message": "Removed from watchlist"}
+
+
+def update_watchlist_item(user, item_id, notes):
+    item = Watchlist.query.filter_by(id=item_id, user_id=user.id).first()
+    if not item:
+        raise ApiError("Item not found", 404, "not_found")
+
+    item.notes = notes
+    db.session.commit()
+    return {"watchlist_item": item.to_dict()}

@@ -48,7 +48,7 @@ export const marketAPI = {
   scan: (data) => api.post('/scan', data, { timeout: 600000 }),
   getScanStatus: (jobId) => api.get(`/scan/status/${jobId}`),
   cancelScan: (jobId) => api.delete(`/scan/${jobId}`),
-  search: (query, market) => api.get('/search', { params: { q: query, market } }),
+  search: (query, market, config = {}) => api.get('/search', { ...config, params: { ...config.params, q: query, market } }),
   getStockDetail: (symbol, timeframe) => api.get(`/stock/${symbol}`, { params: { timeframe }, timeout: 120000 }),
 }
 
@@ -63,6 +63,7 @@ export const fundamentalsAPI = {
 export const watchlistAPI = {
   get: () => api.get('/watchlist'),
   add: (data) => api.post('/watchlist', data),
+  update: (id, data) => api.patch(`/watchlist/${id}`, data),
   remove: (id) => api.delete(`/watchlist/${id}`),
 }
 
@@ -71,6 +72,7 @@ export const adminAPI = {
   updateUser: (id, data) => api.put(`/admin/users/${id}`, data),
   getStats: () => api.get('/admin/stats'),
   getScans: () => api.get('/admin/scans'),
+  getAuditLogs: () => api.get('/admin/audit-logs'),
 }
 
 export const healthAPI = {

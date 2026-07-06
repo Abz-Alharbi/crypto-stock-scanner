@@ -20,6 +20,13 @@ export default function SearchBar() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      searchTickers('');
+    };
+  }, [searchTickers]);
+
   const handleChange = (e) => {
     const val = e.target.value;
     setQuery(val);
@@ -51,7 +58,7 @@ export default function SearchBar() {
           className="w-full pl-10 pr-10 py-2.5 bg-scanner-bg border border-scanner-border rounded-xl text-sm placeholder-scanner-text-dim focus:outline-none focus:border-scanner-accent/50 transition-colors"
         />
         {query && (
-          <button onClick={() => { setQuery(''); setShowDropdown(false); }} className="absolute right-3 top-1/2 -translate-y-1/2 text-scanner-text-dim hover:text-scanner-text">
+          <button onClick={() => { setQuery(''); setShowDropdown(false); searchTickers(''); }} className="absolute right-3 top-1/2 -translate-y-1/2 text-scanner-text-dim hover:text-scanner-text">
             <X size={14} />
           </button>
         )}

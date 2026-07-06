@@ -1,20 +1,22 @@
-import React, { useState } from 'react';
-import { X, TrendingUp, TrendingDown, Minus, Activity, BarChart3, Target, Layers, BookmarkPlus, RefreshCw, ExternalLink } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import { X, TrendingUp, TrendingDown, Minus, Activity, BarChart3, Target, Layers, BookmarkPlus, RefreshCw, ExternalLink, AlertCircle } from 'lucide-react';
 import useMarketStore from '../../store/useMarketStore';
 import useAuthStore from '../../store/useAuthStore';
 import CandlestickChart from '../charts/CandlestickChart';
 import LoadingSpinner from '../common/LoadingSpinner';
 
 export default function StockDetailModal() {
-  const { isDetailOpen, selectedSymbol, selectedProviderSymbol, stockDetail, chartData, isLoadingDetail, isLoadingChart, closeDetail, changeDetailTimeframe, timeframe, timeframes, addToWatchlist, activeMarket } = useMarketStore();
+  const { isDetailOpen, selectedSymbol, selectedProviderSymbol, stockDetail, chartData, isLoadingDetail, isLoadingChart, detailError, watchlistError, closeDetail, changeDetailTimeframe, timeframe, timeframes, addToWatchlist, activeMarket } = useMarketStore();
   const { isAuthenticated } = useAuthStore();
   const [activeTab, setActiveTab] = useState('indicators');
-
-  if (!isDetailOpen) return null;
 
   const analysis = stockDetail?.analysis;
   const price = analysis?.price;
   const indicators = analysis?.indicators;
+  const chartIndicators = useMemo(() => indicators || {}, [indicators]);
+
+  if (!isDetailOpen) return null;
+
   const isPositive = price?.change_pct >= 0;
   const timeframeOptions = Object.entries(timeframes || {}).map(([key, config]) => ({
     key,
@@ -88,15 +90,16 @@ export default function StockDetailModal() {
               {intradayTimeframes.map(tf => (
                 <button
                   key={tf.key}
-                  onClick={() => changeDetailTimeframe(tf.key)}
+                  onClick={() => tf.available && changeDetailTimeframe(tf.key)}
+                  disabled={!tf.available}
                   className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-all ${
                     timeframe === tf.key
                       ? 'bg-scanner-accent text-scanner-bg shadow-sm shadow-scanner-accent/25'
                       : !tf.available
-                        ? 'text-scanner-text-dim/60 hover:text-scanner-text-dim hover:bg-scanner-card border border-dashed border-scanner-border'
+                        ? 'text-scanner-text-dim/40 bg-scanner-card/40 border border-dashed border-scanner-border cursor-not-allowed'
                         : 'text-scanner-text-dim hover:text-scanner-text hover:bg-scanner-card'
                   }`}
-                  title={!tf.available ? 'Requires Polygon.io paid plan' : tf.label}
+                  title={!tf.available ? 'Unavailable on the current data plan' : tf.label}
                 >
                   {tf.shortLabel}
                 </button>
@@ -108,21 +111,29 @@ export default function StockDetailModal() {
               {higherTimeframes.map(tf => (
                 <button
                   key={tf.key}
-                  onClick={() => changeDetailTimeframe(tf.key)}
+                  onClick={() => tf.available && changeDetailTimeframe(tf.key)}
+                  disabled={!tf.available}
                   className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-all ${
                     timeframe === tf.key
                       ? 'bg-scanner-accent text-scanner-bg shadow-sm shadow-scanner-accent/25'
                       : !tf.available
-                        ? 'text-scanner-text-dim/60 hover:text-scanner-text-dim hover:bg-scanner-card border border-dashed border-scanner-border'
+                        ? 'text-scanner-text-dim/40 bg-scanner-card/40 border border-dashed border-scanner-border cursor-not-allowed'
                         : 'text-scanner-text-dim hover:text-scanner-text hover:bg-scanner-card'
                   }`}
-                  title={!tf.available ? 'Requires Polygon.io paid plan' : tf.label}
+                  title={!tf.available ? 'Unavailable on the current data plan' : tf.label}
                 >
                   {tf.shortLabel}
                 </button>
               ))}
             </div>
           </div>
+
+          {(detailError || watchlistError) && (
+            <div className="mx-5 mt-4 flex items-center gap-2 rounded-lg border border-scanner-danger/30 bg-scanner-danger/10 px-3 py-2 text-sm text-scanner-danger">
+              <AlertCircle size={16} />
+              <span>{detailError || watchlistError}</span>
+            </div>
+          )}
 
           {isLoadingDetail ? (
             <div className="p-12"><LoadingSpinner size="lg" text="Loading analysis..." /></div>
@@ -133,7 +144,7 @@ export default function StockDetailModal() {
                 {isLoadingChart ? (
                   <div className="h-[400px] flex items-center justify-center"><LoadingSpinner text="Loading chart..." /></div>
                 ) : (
-                  <CandlestickChart data={chartData} height={400} indicators={indicators || {}} />
+                  <CandlestickChart data={chartData} height={400} indicators={chartIndicators} />
                 )}
               </div>
 

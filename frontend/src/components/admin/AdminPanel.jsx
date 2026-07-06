@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Settings, Users, BarChart3, RefreshCw, Shield, Database, AlertCircle } from 'lucide-react';
+import { Users, BarChart3, RefreshCw, Shield, Database, AlertCircle, FileText } from 'lucide-react';
 import { adminAPI } from '../../services/api';
 import useAuthStore from '../../store/useAuthStore';
 import LoadingSpinner from '../common/LoadingSpinner';
@@ -9,15 +9,17 @@ export default function AdminPanel() {
   const [stats, setStats] = useState(null);
   const [users, setUsers] = useState([]);
   const [scans, setScans] = useState([]);
+  const [auditLogs, setAuditLogs] = useState([]);
   const [activeTab, setActiveTab] = useState('overview');
   const [loading, setLoading] = useState(true);
-  const [loadErrors, setLoadErrors] = useState({ stats: null, users: null, scans: null });
+  const [loadErrors, setLoadErrors] = useState({ stats: null, users: null, scans: null, auditLogs: null });
+  const [updateError, setUpdateError] = useState(null);
 
   useEffect(() => { loadData(); }, []);
 
   const loadData = async () => {
     setLoading(true);
-    setLoadErrors({ stats: null, users: null, scans: null });
+    setLoadErrors({ stats: null, users: null, scans: null, auditLogs: null });
 
     const loadSection = async (section, request, applyData, clearData) => {
       try {
@@ -25,28 +27,29 @@ export default function AdminPanel() {
         applyData(response.data);
         return null;
       } catch (err) {
-        console.error(`Admin ${section} load failed:`, err);
         clearData();
         return err.response?.data?.error || err.message || `Failed to load ${section}`;
       }
     };
 
-    const [statsError, usersError, scansError] = await Promise.all([
+    const [statsError, usersError, scansError, auditLogsError] = await Promise.all([
       loadSection('overview stats', adminAPI.getStats, (data) => setStats(data), () => setStats(null)),
       loadSection('users', adminAPI.getUsers, (data) => setUsers(data.users || []), () => setUsers([])),
       loadSection('scan history', adminAPI.getScans, (data) => setScans(data.scans || []), () => setScans([])),
+      loadSection('audit logs', adminAPI.getAuditLogs, (data) => setAuditLogs(data.audit_logs || []), () => setAuditLogs([])),
     ]);
 
-    setLoadErrors({ stats: statsError, users: usersError, scans: scansError });
+    setLoadErrors({ stats: statsError, users: usersError, scans: scansError, auditLogs: auditLogsError });
     setLoading(false);
   };
 
   const updateUser = async (id, updates) => {
     try {
+      setUpdateError(null);
       await adminAPI.updateUser(id, updates);
       loadData();
     } catch (err) {
-      console.error('Update failed:', err);
+      setUpdateError(err.response?.data?.error || err.message || 'Failed to update user');
     }
   };
 
@@ -63,9 +66,10 @@ export default function AdminPanel() {
   if (loading) return <LoadingSpinner text="Loading admin data..." />;
 
   const tabs = [
-    { key: 'overview', label: 'Overview', icon: BarChart3 },
-    { key: 'users', label: 'Users', icon: Users },
-    { key: 'scans', label: 'Scan History', icon: Database },
+    { key: 'overview', label: 'Overview', icon: BarChart3, error: loadErrors.stats },
+    { key: 'users', label: 'Users', icon: Users, error: loadErrors.users || updateError },
+    { key: 'scans', label: 'Scan History', icon: Database, error: loadErrors.scans },
+    { key: 'audit', label: 'Audit Log', icon: FileText, error: loadErrors.auditLogs },
   ];
 
   const SectionError = ({ message }) => message ? (
@@ -79,7 +83,7 @@ export default function AdminPanel() {
     <div className="space-y-4">
       {/* Tab nav */}
       <div className="flex gap-1 bg-scanner-card border border-scanner-border rounded-xl p-1">
-        {tabs.map(({ key, label, icon: Icon }) => (
+        {tabs.map(({ key, label, icon: Icon, error }) => (
           <button
             key={key}
             onClick={() => setActiveTab(key)}
@@ -88,6 +92,7 @@ export default function AdminPanel() {
             }`}
           >
             <Icon size={14} /> {label}
+            {error && <AlertCircle size={12} className={activeTab === key ? 'text-scanner-bg' : 'text-scanner-danger'} />}
           </button>
         ))}
         <button onClick={loadData} className="ml-auto p-2 rounded-lg hover:bg-scanner-bg text-scanner-text-dim hover:text-scanner-accent transition-colors">
@@ -116,7 +121,9 @@ export default function AdminPanel() {
 
       {/* Users table */}
       {activeTab === 'users' && (
-        loadErrors.users ? <SectionError message={loadErrors.users} /> : <div className="bg-scanner-card border border-scanner-border rounded-xl overflow-hidden">
+        loadErrors.users ? <SectionError message={loadErrors.users} /> : <>
+        <SectionError message={updateError} />
+        <div className="bg-scanner-card border border-scanner-border rounded-xl overflow-hidden">
           <table className="w-full text-sm">
             <thead>
               <tr className="text-[10px] uppercase tracking-widest text-scanner-text-dim border-b border-scanner-border">
@@ -169,6 +176,7 @@ export default function AdminPanel() {
             </tbody>
           </table>
         </div>
+        </>
       )}
 
       {/* Scan history */}
@@ -198,6 +206,49 @@ export default function AdminPanel() {
           </table>
         </div>
       )}
+
+      {/* Audit log */}
+      {activeTab === 'audit' && (
+        loadErrors.auditLogs ? <SectionError message={loadErrors.auditLogs} /> : <div className="bg-scanner-card border border-scanner-border rounded-xl overflow-hidden">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-[10px] uppercase tracking-widest text-scanner-text-dim border-b border-scanner-border">
+                <th className="text-left px-5 py-3">Time</th>
+                <th className="text-left px-3 py-3">Admin</th>
+                <th className="text-left px-3 py-3">Action</th>
+                <th className="text-left px-3 py-3">Target</th>
+                <th className="text-left px-5 py-3">Details</th>
+              </tr>
+            </thead>
+            <tbody>
+              {auditLogs.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="px-5 py-8 text-center text-sm text-scanner-text-dim">No admin actions recorded yet.</td>
+                </tr>
+              ) : auditLogs.map((entry) => (
+                <tr key={entry.id} className="border-b border-scanner-border/50">
+                  <td className="px-5 py-3 text-scanner-text-dim">{new Date(entry.created_at).toLocaleString()}</td>
+                  <td className="px-3 py-3 text-scanner-text-dim">{entry.admin_email || `User #${entry.admin_user_id}`}</td>
+                  <td className="px-3 py-3 font-mono text-xs text-scanner-accent">{entry.action}</td>
+                  <td className="px-3 py-3 text-scanner-text-dim">{entry.target_type} #{entry.target_id}</td>
+                  <td className="px-5 py-3 text-xs text-scanner-text-dim">{formatAuditDetails(entry.details)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
+}
+
+function formatAuditDetails(details) {
+  if (!details) return 'No details';
+  try {
+    const parsed = JSON.parse(details);
+    const changedFields = Object.keys(parsed.updates || {}).join(', ');
+    return `${parsed.target_email || 'Target'} updated${changedFields ? `: ${changedFields}` : ''}`;
+  } catch {
+    return details;
+  }
 }

@@ -1,4 +1,4 @@
-from typing import Any, Dict, Optional
+from typing import Optional
 
 from pydantic import Field, field_validator
 
@@ -88,6 +88,10 @@ class WatchlistAddRequest(ApiModel):
         if value not in VALID_MARKETS:
             raise ValueError("Invalid market")
         return value
+
+
+class WatchlistUpdateRequest(ApiModel):
+    notes: str = Field(default="", max_length=1000)
 
 
 class UpdateUserRequest(ApiModel):

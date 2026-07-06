@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { X, Eye, EyeOff, LogIn, UserPlus, AlertCircle } from 'lucide-react';
 import useAuthStore from '../../store/useAuthStore';
 
 export default function AuthModal() {
   const { showAuthModal, authMode, setAuthModal, login, register, isLoading, error } = useAuthStore();
+  const navigate = useNavigate();
   const [form, setForm] = useState({ username: '', email: '', password: '', confirmPassword: '' });
   const [showPassword, setShowPassword] = useState(false);
   const [localError, setLocalError] = useState('');
@@ -13,14 +15,27 @@ export default function AuthModal() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLocalError('');
+    const completeAuth = () => {
+      const pendingPath = sessionStorage.getItem('pending_auth_path');
+      if (pendingPath) {
+        sessionStorage.removeItem('pending_auth_path');
+        navigate(pendingPath, { replace: true });
+      }
+    };
 
     if (authMode === 'register') {
       if (!form.username.trim()) return setLocalError('Username is required');
       if (form.password !== form.confirmPassword) return setLocalError('Passwords do not match');
       if (form.password.length < 6) return setLocalError('Password must be at least 6 characters');
-      try { await register(form.username.trim(), form.email.trim(), form.password); } catch {}
+      try {
+        await register(form.username.trim(), form.email.trim(), form.password);
+        completeAuth();
+      } catch {}
     } else {
-      try { await login(form.email.trim(), form.password); } catch {}
+      try {
+        await login(form.email.trim(), form.password);
+        completeAuth();
+      } catch {}
     }
   };
 

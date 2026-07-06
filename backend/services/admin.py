@@ -1,5 +1,8 @@
+import json
+
 from backend.errors import ApiError
 from backend.extensions import db
+from backend.models.admin_audit_log import AdminAuditLog
 from backend.models.scan import ScanHistory
 from backend.models.user import User
 from backend.services.cache import cache_size
@@ -10,7 +13,7 @@ def list_users():
     return {"users": [user.to_dict() for user in users]}
 
 
-def update_user(user_id, data):
+def update_user(admin_user, user_id, data):
     if user_id < 1:
         raise ApiError("user_id must be at least 1", 400, "validation_error")
     user = db.session.get(User, user_id)
@@ -26,6 +29,21 @@ def update_user(user_id, data):
         user.plan = updates["plan"]
     if "is_active" in updates:
         user.is_active = updates["is_active"]
+    db.session.add(
+        AdminAuditLog(
+            admin_user_id=admin_user.id,
+            action="update_user",
+            target_type="user",
+            target_id=user.id,
+            details=json.dumps(
+                {
+                    "updates": updates,
+                    "target_email": user.email,
+                },
+                sort_keys=True,
+            ),
+        )
+    )
     db.session.commit()
     return {"user": user.to_dict()}
 
@@ -42,3 +60,8 @@ def stats():
         "total_scans": ScanHistory.query.count(),
         "cache_entries": cache_size(),
     }
+
+
+def list_audit_logs():
+    logs = AdminAuditLog.query.order_by(AdminAuditLog.created_at.desc()).limit(50).all()
+    return {"audit_logs": [log.to_dict() for log in logs]}

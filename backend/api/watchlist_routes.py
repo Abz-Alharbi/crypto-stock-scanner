@@ -2,7 +2,7 @@ from flask import Blueprint, jsonify
 
 from backend.auth.service import token_required
 from backend.schemas.common import parse_json
-from backend.schemas.market import WatchlistAddRequest
+from backend.schemas.market import WatchlistAddRequest, WatchlistUpdateRequest
 from backend.services import watchlist as watchlist_service
 
 watchlist_bp = Blueprint("watchlist", __name__, url_prefix="/api/watchlist")
@@ -31,3 +31,10 @@ def add_watchlist(current_user):
 @token_required
 def remove_watchlist(current_user, item_id):
     return jsonify(watchlist_service.remove_watchlist_item(current_user, item_id))
+
+
+@watchlist_bp.route("/<int:item_id>", methods=["PATCH"])
+@token_required
+def update_watchlist(current_user, item_id):
+    data = parse_json(WatchlistUpdateRequest)
+    return jsonify(watchlist_service.update_watchlist_item(current_user, item_id, data.notes))

@@ -1,22 +1,71 @@
-import React, { useEffect, useRef, memo } from 'react';
+import React, { memo, useEffect, useMemo, useRef } from 'react';
 import { createChart, CrosshairMode } from 'lightweight-charts';
+
+const EMA_COLORS = {
+  ema_9: '#f59e0b',
+  ema_20: '#3b82f6',
+  ema_50: '#a855f7',
+  ema_200: '#ef4444',
+};
+
+const BOLLINGER_OPTIONS = {
+  color: 'rgba(168, 85, 247, 0.4)',
+  lineWidth: 1,
+  lineStyle: 2,
+  priceLineVisible: false,
+  lastValueVisible: false,
+};
+
+const LINE_OPTIONS = {
+  lineWidth: 1,
+  priceLineVisible: false,
+  lastValueVisible: false,
+  crosshairMarkerVisible: false,
+};
 
 const CandlestickChart = memo(function CandlestickChart({ data, height = 400, indicators = {} }) {
   const containerRef = useRef(null);
   const chartRef = useRef(null);
+  const candleSeriesRef = useRef(null);
+  const volumeSeriesRef = useRef(null);
+  const candleDataRef = useRef([]);
+  const volumeDataRef = useRef([]);
+  const overlaySeriesRef = useRef(new Map());
+  const overlayDataRef = useRef(new Map());
+
+  const chartData = useMemo(() => {
+    if (!data || data.length === 0) return [];
+
+    return data.map(bar => ({
+      time: Math.floor(bar.t / 1000),
+      open: bar.o,
+      high: bar.h,
+      low: bar.l,
+      close: bar.c,
+    })).sort((a, b) => a.time - b.time);
+  }, [data]);
+
+  const volumeData = useMemo(() => {
+    if (!data || data.length === 0) return [];
+
+    return data.map(bar => ({
+      time: Math.floor(bar.t / 1000),
+      value: bar.v || 0,
+      color: bar.c >= bar.o ? 'rgba(0, 212, 170, 0.2)' : 'rgba(239, 68, 68, 0.2)',
+    })).sort((a, b) => a.time - b.time);
+  }, [data]);
+
+  const hasData = chartData.length > 0;
+  const showEma = Boolean(indicators?.ema);
+  const showBollingerBands = Boolean(indicators?.bollinger_bands?.upper);
 
   useEffect(() => {
-    if (!containerRef.current || !data || data.length === 0) return;
+    const container = containerRef.current;
+    if (!container || !hasData) return undefined;
 
-    // Clear previous chart
-    if (chartRef.current) {
-      chartRef.current.remove();
-      chartRef.current = null;
-    }
-
-    const chart = createChart(containerRef.current, {
-      width: containerRef.current.clientWidth,
-      height: height,
+    const chart = createChart(container, {
+      width: container.clientWidth,
+      height,
       layout: {
         background: { color: 'transparent' },
         textColor: '#9ca3af',
@@ -46,9 +95,10 @@ const CandlestickChart = memo(function CandlestickChart({ data, height = 400, in
     });
 
     chartRef.current = chart;
+    const overlaySeriesMap = overlaySeriesRef.current;
+    const overlayDataMap = overlayDataRef.current;
 
-    // Candlestick series
-    const candleSeries = chart.addCandlestickSeries({
+    candleSeriesRef.current = chart.addCandlestickSeries({
       upColor: '#00d4aa',
       downColor: '#ef4444',
       borderDownColor: '#ef4444',
@@ -56,19 +106,7 @@ const CandlestickChart = memo(function CandlestickChart({ data, height = 400, in
       wickDownColor: '#ef4444',
       wickUpColor: '#00d4aa',
     });
-
-    const chartData = data.map(bar => ({
-      time: Math.floor(bar.t / 1000), // Polygon sends ms timestamps
-      open: bar.o,
-      high: bar.h,
-      low: bar.l,
-      close: bar.c,
-    })).sort((a, b) => a.time - b.time);
-
-    candleSeries.setData(chartData);
-
-    // Volume series
-    const volumeSeries = chart.addHistogramSeries({
+    volumeSeriesRef.current = chart.addHistogramSeries({
       color: '#00d4aa33',
       priceFormat: { type: 'volume' },
       priceScaleId: 'volume',
@@ -78,73 +116,93 @@ const CandlestickChart = memo(function CandlestickChart({ data, height = 400, in
       scaleMargins: { top: 0.85, bottom: 0 },
     });
 
-    const volumeData = data.map(bar => ({
-      time: Math.floor(bar.t / 1000),
-      value: bar.v || 0,
-      color: bar.c >= bar.o ? 'rgba(0, 212, 170, 0.2)' : 'rgba(239, 68, 68, 0.2)',
-    })).sort((a, b) => a.time - b.time);
-
-    volumeSeries.setData(volumeData);
-
-    // Add EMA overlays if available
-    if (indicators.ema) {
-      const emaColors = { ema_9: '#f59e0b', ema_20: '#3b82f6', ema_50: '#a855f7', ema_200: '#ef4444' };
-      // We'll compute EMAs from the chart data for visual overlay
-      Object.entries(emaColors).forEach(([key, color]) => {
-        const period = parseInt(key.split('_')[1]);
-        if (chartData.length >= period) {
-          const emaData = computeEMA(chartData.map(d => d.close), period);
-          if (emaData.length > 0) {
-            const lineSeries = chart.addLineSeries({
-              color: color,
-              lineWidth: 1,
-              priceLineVisible: false,
-              lastValueVisible: false,
-              crosshairMarkerVisible: false,
-            });
-            const lineData = emaData.map((val, idx) => ({
-              time: chartData[chartData.length - emaData.length + idx].time,
-              value: val,
-            }));
-            lineSeries.setData(lineData);
-          }
-        }
-      });
-    }
-
-    // Add Bollinger Bands if available
-    if (indicators.bollinger_bands && indicators.bollinger_bands.upper) {
-      // Compute BB for visual overlay
-      const bbData = computeBollingerBands(chartData.map(d => d.close), 20, 2);
-      if (bbData.upper.length > 0) {
-        const bbUpper = chart.addLineSeries({ color: 'rgba(168, 85, 247, 0.4)', lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false });
-        const bbLower = chart.addLineSeries({ color: 'rgba(168, 85, 247, 0.4)', lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false });
-
-        const startIdx = chartData.length - bbData.upper.length;
-        bbUpper.setData(bbData.upper.map((val, idx) => ({ time: chartData[startIdx + idx].time, value: val })));
-        bbLower.setData(bbData.lower.map((val, idx) => ({ time: chartData[startIdx + idx].time, value: val })));
-      }
-    }
-
-    // Fit content
-    chart.timeScale().fitContent();
-
-    // Handle resize
     const handleResize = () => {
       if (containerRef.current && chartRef.current) {
         chartRef.current.applyOptions({ width: containerRef.current.clientWidth });
       }
     };
+
     window.addEventListener('resize', handleResize);
 
     return () => {
       window.removeEventListener('resize', handleResize);
-      if (chartRef.current) {
-        chartRef.current.remove();
-        chartRef.current = null;
-      }
+      chart.remove();
+      chartRef.current = null;
+      candleSeriesRef.current = null;
+      volumeSeriesRef.current = null;
+      candleDataRef.current = [];
+      volumeDataRef.current = [];
+      overlaySeriesMap.clear();
+      overlayDataMap.clear();
     };
-  }, [data, height, indicators]);
+  }, [hasData, height]);
+
+  useEffect(() => {
+    if (!hasData || !candleSeriesRef.current || !volumeSeriesRef.current) return;
+
+    candleDataRef.current = updateSeriesData(candleSeriesRef.current, candleDataRef.current, chartData);
+    volumeDataRef.current = updateSeriesData(volumeSeriesRef.current, volumeDataRef.current, volumeData);
+    chartRef.current?.timeScale().fitContent();
+  }, [chartData, hasData, volumeData]);
+
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart || !hasData) return;
+
+    const activeSeries = new Set();
+    const closePrices = chartData.map(point => point.close);
+
+    if (showEma) {
+      Object.entries(EMA_COLORS).forEach(([key, color]) => {
+        const period = parseInt(key.split('_')[1], 10);
+        if (chartData.length < period) return;
+
+        const emaData = computeEMA(closePrices, period);
+        if (emaData.length === 0) return;
+
+        const startIdx = chartData.length - emaData.length;
+        const lineData = emaData.map((value, idx) => ({
+          time: chartData[startIdx + idx].time,
+          value,
+        }));
+
+        activeSeries.add(key);
+        const series = ensureLineSeries(chart, overlaySeriesRef.current, key, { ...LINE_OPTIONS, color });
+        overlayDataRef.current.set(key, updateSeriesData(series, overlayDataRef.current.get(key) || [], lineData));
+      });
+    }
+
+    if (showBollingerBands) {
+      const bbData = computeBollingerBands(closePrices, 20, 2);
+      if (bbData.upper.length > 0) {
+        const startIdx = chartData.length - bbData.upper.length;
+        const upperData = bbData.upper.map((value, idx) => ({
+          time: chartData[startIdx + idx].time,
+          value,
+        }));
+        const lowerData = bbData.lower.map((value, idx) => ({
+          time: chartData[startIdx + idx].time,
+          value,
+        }));
+
+        activeSeries.add('bb_upper');
+        activeSeries.add('bb_lower');
+
+        const upperSeries = ensureLineSeries(chart, overlaySeriesRef.current, 'bb_upper', BOLLINGER_OPTIONS);
+        const lowerSeries = ensureLineSeries(chart, overlaySeriesRef.current, 'bb_lower', BOLLINGER_OPTIONS);
+
+        overlayDataRef.current.set('bb_upper', updateSeriesData(upperSeries, overlayDataRef.current.get('bb_upper') || [], upperData));
+        overlayDataRef.current.set('bb_lower', updateSeriesData(lowerSeries, overlayDataRef.current.get('bb_lower') || [], lowerData));
+      }
+    }
+
+    overlaySeriesRef.current.forEach((series, key) => {
+      if (activeSeries.has(key)) return;
+      chart.removeSeries(series);
+      overlaySeriesRef.current.delete(key);
+      overlayDataRef.current.delete(key);
+    });
+  }, [chartData, hasData, showBollingerBands, showEma]);
 
   if (!data || data.length === 0) {
     return (
@@ -157,22 +215,66 @@ const CandlestickChart = memo(function CandlestickChart({ data, height = 400, in
   return <div ref={containerRef} className="chart-container rounded-xl overflow-hidden" />;
 });
 
-// Helper: Compute EMA
+function ensureLineSeries(chart, seriesMap, key, options) {
+  const existingSeries = seriesMap.get(key);
+  if (existingSeries) return existingSeries;
+
+  const series = chart.addLineSeries(options);
+  seriesMap.set(key, series);
+  return series;
+}
+
+function updateSeriesData(series, previousData, nextData) {
+  if (nextData.length === 0) {
+    series.setData([]);
+    return [];
+  }
+
+  if (canPatchSeries(previousData, nextData)) {
+    const updateStart = Math.max(0, previousData.length - 1);
+    nextData.slice(updateStart).forEach(point => series.update(point));
+    return nextData;
+  }
+
+  series.setData(nextData);
+  return nextData;
+}
+
+function canPatchSeries(previousData, nextData) {
+  if (previousData.length === 0 || nextData.length < previousData.length) return false;
+  if (previousData[previousData.length - 1].time !== nextData[previousData.length - 1].time) return false;
+
+  for (let i = 0; i < previousData.length - 1; i += 1) {
+    if (!isSamePoint(previousData[i], nextData[i])) return false;
+  }
+
+  return true;
+}
+
+function isSamePoint(left, right) {
+  const leftKeys = Object.keys(left);
+  const rightKeys = Object.keys(right);
+  if (leftKeys.length !== rightKeys.length) return false;
+  return leftKeys.every(key => left[key] === right[key]);
+}
+
 function computeEMA(prices, period) {
   if (prices.length < period) return [];
   const k = 2 / (period + 1);
   const ema = [prices.slice(0, period).reduce((a, b) => a + b, 0) / period];
-  for (let i = period; i < prices.length; i++) {
+  for (let i = period; i < prices.length; i += 1) {
     ema.push(prices[i] * k + ema[ema.length - 1] * (1 - k));
   }
   return ema;
 }
 
-// Helper: Compute Bollinger Bands
 function computeBollingerBands(prices, period = 20, stdDev = 2) {
   if (prices.length < period) return { upper: [], middle: [], lower: [] };
-  const upper = [], middle = [], lower = [];
-  for (let i = period - 1; i < prices.length; i++) {
+  const upper = [];
+  const middle = [];
+  const lower = [];
+
+  for (let i = period - 1; i < prices.length; i += 1) {
     const slice = prices.slice(i - period + 1, i + 1);
     const mean = slice.reduce((a, b) => a + b, 0) / period;
     const std = Math.sqrt(slice.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / period);
@@ -180,6 +282,7 @@ function computeBollingerBands(prices, period = 20, stdDev = 2) {
     upper.push(mean + stdDev * std);
     lower.push(mean - stdDev * std);
   }
+
   return { upper, middle, lower };
 }
 

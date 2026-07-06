@@ -80,9 +80,9 @@ class TechnicalAnalysis:
         for i in range(min(d_period, len(closes) - k_period + 1)):
             idx = len(closes) - 1 - i
             h = max(highs[max(0, idx - k_period + 1):idx + 1])
-            l = min(lows[max(0, idx - k_period + 1):idx + 1])
-            if h != l:
-                k_values.append(((closes[idx] - l) / (h - l)) * 100)
+            low = min(lows[max(0, idx - k_period + 1):idx + 1])
+            if h != low:
+                k_values.append(((closes[idx] - low) / (h - low)) * 100)
         d = np.mean(k_values) if k_values else k
         return float(k), float(d)
 
@@ -321,7 +321,7 @@ class TechnicalAnalysis:
         if not swing_lows:
             swing_lows = [min(recent_lows)]
 
-        supports = sorted([l for l in swing_lows if l < last_price], reverse=True)
+        supports = sorted([level for level in swing_lows if level < last_price], reverse=True)
         resistances = sorted([r for r in swing_highs if r > last_price])
 
         return supports, resistances
@@ -453,30 +453,48 @@ class TechnicalAnalysis:
         stoch_data = indicators.get('stochastic', {})
 
         if direction == 'long':
-            if rsi and rsi < 35: confidence += 10
-            if rsi and rsi < 25: confidence += 5
-            if macd_data.get('histogram') and macd_data['histogram'] > 0: confidence += 8
-            if ema_data.get('ema_50') and ema_data.get('ema_200') and ema_data['ema_50'] > ema_data['ema_200']: confidence += 10
-            if bb_data.get('lower') and last_price <= bb_data['lower'] * 1.01: confidence += 7
-            if stoch_data.get('k') and stoch_data['k'] < 25: confidence += 5
-            if any(p['type'] == 'bullish' for p in candle_patterns): confidence += 8
-            if any(p['type'] == 'bullish' for p in chart_patterns): confidence += 10
+            if rsi and rsi < 35:
+                confidence += 10
+            if rsi and rsi < 25:
+                confidence += 5
+            if macd_data.get('histogram') and macd_data['histogram'] > 0:
+                confidence += 8
+            if ema_data.get('ema_50') and ema_data.get('ema_200') and ema_data['ema_50'] > ema_data['ema_200']:
+                confidence += 10
+            if bb_data.get('lower') and last_price <= bb_data['lower'] * 1.01:
+                confidence += 7
+            if stoch_data.get('k') and stoch_data['k'] < 25:
+                confidence += 5
+            if any(p['type'] == 'bullish' for p in candle_patterns):
+                confidence += 8
+            if any(p['type'] == 'bullish' for p in chart_patterns):
+                confidence += 10
             # Volume confirmation
             if len(volumes) >= 20:
                 avg_vol = np.mean(volumes[-20:])
-                if volumes[-1] > avg_vol * 1.5: confidence += 7
+                if volumes[-1] > avg_vol * 1.5:
+                    confidence += 7
         elif direction == 'short':
-            if rsi and rsi > 65: confidence += 10
-            if rsi and rsi > 75: confidence += 5
-            if macd_data.get('histogram') and macd_data['histogram'] < 0: confidence += 8
-            if ema_data.get('ema_50') and ema_data.get('ema_200') and ema_data['ema_50'] < ema_data['ema_200']: confidence += 10
-            if bb_data.get('upper') and last_price >= bb_data['upper'] * 0.99: confidence += 7
-            if stoch_data.get('k') and stoch_data['k'] > 75: confidence += 5
-            if any(p['type'] == 'bearish' for p in candle_patterns): confidence += 8
-            if any(p['type'] == 'bearish' for p in chart_patterns): confidence += 10
+            if rsi and rsi > 65:
+                confidence += 10
+            if rsi and rsi > 75:
+                confidence += 5
+            if macd_data.get('histogram') and macd_data['histogram'] < 0:
+                confidence += 8
+            if ema_data.get('ema_50') and ema_data.get('ema_200') and ema_data['ema_50'] < ema_data['ema_200']:
+                confidence += 10
+            if bb_data.get('upper') and last_price >= bb_data['upper'] * 0.99:
+                confidence += 7
+            if stoch_data.get('k') and stoch_data['k'] > 75:
+                confidence += 5
+            if any(p['type'] == 'bearish' for p in candle_patterns):
+                confidence += 8
+            if any(p['type'] == 'bearish' for p in chart_patterns):
+                confidence += 10
             if len(volumes) >= 20:
                 avg_vol = np.mean(volumes[-20:])
-                if volumes[-1] > avg_vol * 1.5: confidence += 7
+                if volumes[-1] > avg_vol * 1.5:
+                    confidence += 7
 
         # ── Fibonacci position bonus ──────────────────────
         if fib_levels:
@@ -599,11 +617,11 @@ class TechnicalAnalysis:
         if len(closes) < 3:
             return patterns
 
-        o, h, l, c = opens[-1], highs[-1], lows[-1], closes[-1]
+        o, h, low, c = opens[-1], highs[-1], lows[-1], closes[-1]
         body = abs(c - o)
-        total_range = h - l if h != l else 0.0001
+        total_range = h - low if h != low else 0.0001
         upper_shadow = h - max(o, c)
-        lower_shadow = min(o, c) - l
+        lower_shadow = min(o, c) - low
 
         # Doji
         if body / total_range < 0.1:
@@ -730,8 +748,8 @@ class TechnicalAnalysis:
         # Fill fibonacci nearest levels
         if fib_levels:
             levels = sorted([fib_levels[k] for k in fib_levels if k.startswith('level_')])
-            supports = [l for l in levels if l < last_price]
-            resistances = [l for l in levels if l > last_price]
+            supports = [level for level in levels if level < last_price]
+            resistances = [level for level in levels if level > last_price]
             fib_levels['nearest_support'] = supports[-1] if supports else None
             fib_levels['nearest_resistance'] = resistances[0] if resistances else None
 
@@ -797,9 +815,6 @@ class TechnicalAnalysis:
             overall_signal = 'bullish'
         elif bearish_count > bullish_count + 1:
             overall_signal = 'bearish'
-
-        # Calculate ATR and trade setup
-        atr = TechnicalAnalysis.calculate_atr(highs, lows, closes)
 
         indicators_dict = {
             'rsi': round(rsi, 2) if rsi else None,

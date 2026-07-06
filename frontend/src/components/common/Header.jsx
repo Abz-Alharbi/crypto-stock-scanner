@@ -1,32 +1,40 @@
 import React, { useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { Activity, TrendingUp, LogIn, LogOut, User, Settings, Search, Menu, X, BookmarkPlus, Newspaper, PieChart } from 'lucide-react';
 import useAuthStore from '../../store/useAuthStore';
 import useMarketStore from '../../store/useMarketStore';
 import ThemeToggle from './ThemeToggle';
 
-export default function Header({ currentPage, setCurrentPage }) {
+export default function Header() {
   const { user, isAuthenticated, logout, setAuthModal } = useAuthStore();
   const { activeMarket, setMarket, isConnected } = useMarketStore();
+  const location = useLocation();
+  const navigate = useNavigate();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
 
   const navItems = [
-    { key: 'scanner', label: 'Scanner', icon: Activity },
-    { key: 'newsroom', label: 'Newsroom', icon: Newspaper },
-    { key: 'fundamentals', label: 'Fundamentals', icon: PieChart },
-    { key: 'watchlist', label: 'Watchlist', icon: BookmarkPlus },
+    { key: 'scanner', label: 'Scanner', icon: Activity, path: '/', active: (path) => path === '/' },
+    { key: 'news', label: 'News', icon: Newspaper, path: '/news', active: (path) => path.startsWith('/news') },
+    { key: 'fundamentals', label: 'Fundamentals', icon: PieChart, path: '/fundamentals/AAPL', active: (path) => path.startsWith('/fundamentals') },
+    { key: 'watchlist', label: 'Watchlist', icon: BookmarkPlus, path: '/watchlist', active: (path) => path.startsWith('/watchlist') },
   ];
 
   if (user?.role === 'admin') {
-    navItems.push({ key: 'admin', label: 'Admin', icon: Settings });
+    navItems.push({ key: 'admin', label: 'Admin', icon: Settings, path: '/admin', active: (path) => path.startsWith('/admin') });
   }
+
+  const goTo = (path) => {
+    navigate(path);
+    setMobileMenuOpen(false);
+  };
 
   return (
     <header className="glass gradient-border sticky top-0 z-40">
       <div className="max-w-[1600px] mx-auto px-4 sm:px-6">
         <div className="flex items-center justify-between h-16">
           {/* Logo */}
-          <div className="flex items-center gap-3 cursor-pointer" onClick={() => setCurrentPage('scanner')}>
+          <div className="flex items-center gap-3 cursor-pointer" onClick={() => goTo('/')}>
             <div className="relative">
               <div className="w-9 h-9 bg-gradient-to-br from-scanner-accent to-emerald-600 rounded-lg flex items-center justify-center">
                 <TrendingUp size={20} className="text-scanner-bg" />
@@ -58,12 +66,12 @@ export default function Header({ currentPage, setCurrentPage }) {
 
           {/* Nav items */}
           <nav className="hidden md:flex items-center gap-1">
-            {navItems.map(({ key, label, icon: Icon }) => (
+            {navItems.map(({ key, label, icon: Icon, path, active }) => (
               <button
                 key={key}
-                onClick={() => setCurrentPage(key)}
+                onClick={() => goTo(path)}
                 className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
-                  currentPage === key
+                  active(location.pathname)
                     ? 'bg-scanner-accent/10 text-scanner-accent'
                     : 'text-scanner-text-dim hover:text-scanner-text hover:bg-scanner-card'
                 }`}
@@ -140,12 +148,12 @@ export default function Header({ currentPage, setCurrentPage }) {
                 </button>
               ))}
             </div>
-            {navItems.map(({ key, label, icon: Icon }) => (
+            {navItems.map(({ key, label, icon: Icon, path, active }) => (
               <button
                 key={key}
-                onClick={() => { setCurrentPage(key); setMobileMenuOpen(false); }}
+                onClick={() => goTo(path)}
                 className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm ${
-                  currentPage === key ? 'bg-scanner-accent/10 text-scanner-accent' : 'text-scanner-text-dim hover:bg-scanner-card'
+                  active(location.pathname) ? 'bg-scanner-accent/10 text-scanner-accent' : 'text-scanner-text-dim hover:bg-scanner-card'
                 }`}
               >
                 <Icon size={16} /> {label}

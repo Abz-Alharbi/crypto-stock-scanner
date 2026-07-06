@@ -6,7 +6,7 @@ import LoadingSpinner, { SkeletonRow } from '../common/LoadingSpinner';
 import TradeSetupCard from '../TradeSetupCard';
 
 export default function ScanResults() {
-  const { scanResults, scanMeta, isScanning, scanError, scanProgress, openDetail, addToWatchlist, activeMarket } = useMarketStore();
+  const { scanResults, scanMeta, isScanning, scanError, scanProgress, watchlistError, openDetail, addToWatchlist, activeMarket } = useMarketStore();
   const { isAuthenticated } = useAuthStore();
   const [expandedRow, setExpandedRow] = useState(null);
 
@@ -77,6 +77,13 @@ export default function ScanResults() {
 
   return (
     <div className="bg-scanner-card border border-scanner-border rounded-2xl overflow-hidden">
+      {watchlistError && (
+        <div className="m-4 flex items-center gap-2 rounded-lg border border-scanner-danger/30 bg-scanner-danger/10 px-3 py-2 text-sm text-scanner-danger">
+          <AlertCircle size={16} />
+          <span>{watchlistError}</span>
+        </div>
+      )}
+
       {/* Results Header */}
       {scanMeta && (
         <div className="px-5 py-3 border-b border-scanner-border bg-gradient-to-r from-scanner-card to-scanner-bg flex flex-wrap items-center justify-between gap-2">

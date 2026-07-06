@@ -24,7 +24,6 @@ class SentimentAnalyzer:
         """Try to load FinBERT model. Falls back to lexicon if unavailable."""
         try:
             from transformers import AutoTokenizer, AutoModelForSequenceClassification
-            import torch
             logger.info("Loading FinBERT model (first run may download ~500MB)...")
             model_name = "ProsusAI/finbert"
             self.tokenizer = AutoTokenizer.from_pretrained(model_name)
@@ -157,7 +156,7 @@ class NewsAggregator:
         try:
             to_date = datetime.now().strftime('%Y-%m-%d')
             from_date = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
-            url = f"https://finnhub.io/api/v1/company-news"
+            url = "https://finnhub.io/api/v1/company-news"
             params = {
                 'symbol': symbol,
                 'from': from_date,
@@ -337,7 +336,7 @@ class NewsAggregator:
             return []
 
         try:
-            rss_url = f"https://feeds.marketwatch.com/marketwatch/StockstoWatch/"
+            rss_url = "https://feeds.marketwatch.com/marketwatch/StockstoWatch/"
             feed = feedparser.parse(rss_url)
             articles = []
 
