@@ -1,6 +1,7 @@
 import os
 import time
 import uuid
+import logging
 
 from rq import Queue
 from rq.job import Job
@@ -19,6 +20,8 @@ SCAN_QUEUE_NAME = os.getenv("SCAN_QUEUE_NAME", "scans")
 SCAN_JOB_TTL_SECONDS = int(os.getenv("SCAN_JOB_TTL_SECONDS", "86400"))
 SCAN_JOB_TIMEOUT_SECONDS = int(os.getenv("SCAN_JOB_TIMEOUT_SECONDS", "1800"))
 
+logger = logging.getLogger(__name__)
+
 
 def _state_key(job_id):
     return f"scan_job:{job_id}:state"
@@ -26,6 +29,16 @@ def _state_key(job_id):
 
 def _cancel_key(job_id):
     return f"scan_job:{job_id}:cancel"
+
+
+def _state_age_seconds(state):
+    try:
+        created_at = float(state.get("created_at") or 0)
+    except (TypeError, ValueError):
+        return 0
+    if not created_at:
+        return 0
+    return time.time() - created_at
 
 
 def get_scan_queue():
@@ -56,16 +69,30 @@ def get_scan_job_state(job_id):
     try:
         job = Job.fetch(job_id, connection=client)
     except NoSuchJobError:
-        created_at = float(state.get("created_at") or 0)
-        if created_at and time.time() - created_at > 30:
+        if _state_age_seconds(state) > 30:
             return set_scan_job_state(
                 job_id,
                 status="failed",
                 error="Scan job disappeared from the queue. Please restart the worker service and try again.",
             )
         return state
+    except Exception as exc:
+        logger.exception("scan_job_status_fetch_failed", extra={"job_id": job_id})
+        return set_scan_job_state(
+            job_id,
+            status="failed",
+            error=f"Unable to read scan worker status: {exc}",
+        )
 
-    rq_status = job.get_status(refresh=True)
+    try:
+        rq_status = job.get_status(refresh=True)
+    except Exception as exc:
+        logger.exception("scan_job_status_refresh_failed", extra={"job_id": job_id})
+        return set_scan_job_state(
+            job_id,
+            status="failed",
+            error=f"Unable to refresh scan worker status: {exc}",
+        )
     if rq_status == "failed":
         error = job.exc_info or "The scan worker failed before it could report progress."
         return set_scan_job_state(job_id, status="failed", error=str(error).splitlines()[-1])
