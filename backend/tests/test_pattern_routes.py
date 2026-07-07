@@ -1,11 +1,10 @@
 import base64
-import sys
+import io
 from pathlib import Path
-from types import SimpleNamespace
 
-import numpy as np
 import pytest
 from openpyxl import load_workbook
+from PIL import Image
 
 from backend.errors import ApiError
 from backend.services import pattern_detection
@@ -15,29 +14,14 @@ def _bearer(token):
     return {"Authorization": f"Bearer {token}"}
 
 
-def _fake_cv2(tmp_path):
-    def imdecode(_buffer, _flags):
-        return np.zeros((32, 32, 3), dtype=np.uint8)
-
-    def imwrite(path, _image):
-        tmp_path.joinpath("wrote_screenshot.marker").write_text(path)
-        with open(path, "wb") as handle:
-            handle.write(b"annotated-jpg")
-        return True
-
-    return SimpleNamespace(
-        FONT_HERSHEY_SIMPLEX=0,
-        IMREAD_COLOR=1,
-        imdecode=imdecode,
-        imwrite=imwrite,
-        rectangle=lambda *_args, **_kwargs: None,
-        putText=lambda *_args, **_kwargs: None,
-    )
+def _sample_png_base64():
+    buffer = io.BytesIO()
+    Image.new("RGB", (32, 32), color=(255, 255, 255)).save(buffer, format="PNG")
+    return base64.b64encode(buffer.getvalue()).decode("ascii")
 
 
 def test_pattern_detect_endpoint_accepts_base64_image_and_logs_detection(client, app, monkeypatch, tmp_path):
     app.config["PATTERN_LOG_ROOT"] = str(tmp_path / "pattern_detections")
-    monkeypatch.setitem(sys.modules, "cv2", _fake_cv2(tmp_path))
     monkeypatch.setattr(pattern_detection, "get_redis_client", lambda: None)
     monkeypatch.setattr(
         pattern_detection.yoloService,
@@ -62,10 +46,9 @@ def test_pattern_detect_endpoint_accepts_base64_image_and_logs_detection(client,
     )
     token = register_response.get_json()["token"]
 
-    image = base64.b64encode(b"base64-encoded-test-chart-image").decode("ascii")
     response = client.post(
         "/api/patterns/detect",
-        json={"image": image, "symbol": "AAPL", "timeframe": "1D"},
+        json={"image": _sample_png_base64(), "symbol": "AAPL", "timeframe": "1D"},
         headers=_bearer(token),
     )
 
@@ -77,11 +60,9 @@ def test_pattern_detect_endpoint_accepts_base64_image_and_logs_detection(client,
     assert payload["talib_conflict"] is False
     assert payload["screenshot_path"].endswith(".jpg")
 
-    screenshot_path = tmp_path / "wrote_screenshot.marker"
-    assert screenshot_path.exists()
-
     screenshot_parts = Path(payload["screenshot_path"]).parts
     user_id = screenshot_parts[screenshot_parts.index("pattern_detections") + 1]
+    assert Path(payload["screenshot_path"]).exists()
     log_files = list((tmp_path / "pattern_detections" / user_id).glob("*.xlsx"))
     assert len(log_files) == 1
     worksheet = load_workbook(log_files[0]).active

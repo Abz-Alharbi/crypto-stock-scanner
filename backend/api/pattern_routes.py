@@ -17,4 +17,7 @@ def detect_patterns(current_user):
         pattern_detection.ensure_pattern_rate_limit(current_user.id)
         return jsonify(pattern_detection.detect_pattern_for_user(current_user, data))
     except ApiError as exc:
-        return jsonify({"error": exc.message, "signal_priority": None}), exc.status_code
+        payload = {"error": exc.message, "code": exc.code, "signal_priority": None}
+        if exc.details is not None:
+            payload["details"] = exc.details
+        return jsonify(payload), exc.status_code

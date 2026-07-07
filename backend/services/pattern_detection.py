@@ -1,5 +1,6 @@
 import base64
 import binascii
+import io
 import logging
 from datetime import datetime
 from pathlib import Path
@@ -79,17 +80,26 @@ def detect_pattern_for_user(user, data):
 
 
 def decode_base64_image(encoded_image):
-    cv2 = _import_cv2()
-
     payload = encoded_image.split(",", 1)[1] if encoded_image.startswith("data:") else encoded_image
     try:
         image_bytes = base64.b64decode(payload, validate=True)
     except (ValueError, binascii.Error) as exc:
         raise ApiError("Invalid base64 image", 400, "invalid_image") from exc
 
-    buffer = np.frombuffer(image_bytes, dtype=np.uint8)
-    mat = cv2.imdecode(buffer, cv2.IMREAD_COLOR)
-    if mat is None:
+    try:
+        from PIL import Image, UnidentifiedImageError
+    except Exception as exc:
+        details = {
+            "exception_type": type(exc).__name__,
+            "exception_message": str(exc),
+        }
+        logger.exception("pillow_import_failed", extra=details)
+        raise ApiError("Pillow is not installed", 503, "pillow_unavailable", details) from exc
+
+    try:
+        with Image.open(io.BytesIO(image_bytes)) as image:
+            mat = np.asarray(image.convert("RGB")).copy()
+    except (UnidentifiedImageError, OSError, ValueError):
         raise ApiError("Image could not be decoded", 400, "invalid_image")
     return mat
 
@@ -104,19 +114,34 @@ def get_talib_patterns(symbol, timeframe):
 
 
 def save_annotated_screenshot(user_id, timestamp, image, bounding_boxes):
-    cv2 = _import_cv2()
+    try:
+        from PIL import Image, ImageDraw
+    except Exception as exc:
+        details = {
+            "exception_type": type(exc).__name__,
+            "exception_message": str(exc),
+        }
+        logger.exception("pillow_import_failed", extra=details)
+        raise ApiError("Pillow is not installed", 503, "pillow_unavailable", details) from exc
 
     root = _pattern_log_root()
     screenshot_dir = root / str(user_id) / "screenshots"
     screenshot_dir.mkdir(parents=True, exist_ok=True)
     screenshot_path = screenshot_dir / f"{_timestamp_slug(timestamp)}.jpg"
 
-    annotated = image.copy()
+    array = np.asarray(image)
+    if array.ndim == 2:
+        annotated = Image.fromarray(array).convert("RGB")
+    else:
+        annotated = Image.fromarray(array.astype(np.uint8)).convert("RGB")
+    draw = ImageDraw.Draw(annotated)
     for bbox in bounding_boxes or []:
         x1, y1, x2, y2 = [int(round(value)) for value in bbox]
-        cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 255, 0), 2)
+        draw.rectangle((x1, y1, x2, y2), outline=(0, 255, 0), width=2)
 
-    if not cv2.imwrite(str(screenshot_path), annotated):
+    try:
+        annotated.save(screenshot_path, format="JPEG", quality=90)
+    except OSError:
         raise ApiError("Annotated screenshot could not be saved", 500, "screenshot_save_failed")
     return str(screenshot_path)
 
