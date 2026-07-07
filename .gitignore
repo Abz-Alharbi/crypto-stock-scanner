@@ -10,3 +10,4 @@ venv/
 dist/
 instance/*.db
 *.db
+backend/build/
