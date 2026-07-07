@@ -36,14 +36,15 @@ def _import_cv2():
     try:
         import cv2
     except Exception as exc:
+        details = {
+            "exception_type": type(exc).__name__,
+            "exception_message": str(exc),
+        }
         logger.exception(
             "opencv_import_failed",
-            extra={
-                "exception_type": type(exc).__name__,
-                "exception_message": str(exc),
-            },
+            extra=details,
         )
-        raise ApiError("OpenCV is not installed", 503, "opencv_unavailable") from exc
+        raise ApiError("OpenCV is not installed", 503, "opencv_unavailable", details) from exc
     return cv2
 
 

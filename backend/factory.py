@@ -142,6 +142,37 @@ def _register_cli(app):
         payload = polygon.debug_aggregates_raw(symbol.upper(), str(from_date), str(to_date))
         click.echo(json.dumps(payload, indent=2))
 
+    @app.cli.command("debug-opencv")
+    def debug_opencv_command():
+        """Report whether OpenCV/cv2 imports in this runtime."""
+        import json
+
+        try:
+            import cv2
+        except Exception as exc:
+            click.echo(
+                json.dumps(
+                    {
+                        "ok": False,
+                        "exception_type": type(exc).__name__,
+                        "exception_message": str(exc),
+                    },
+                    indent=2,
+                )
+            )
+            raise click.ClickException("OpenCV import failed") from exc
+
+        click.echo(
+            json.dumps(
+                {
+                    "ok": True,
+                    "version": getattr(cv2, "__version__", None),
+                    "file": getattr(cv2, "__file__", None),
+                },
+                indent=2,
+            )
+        )
+
     @app.cli.command("debug-scan")
     @click.option("--market", default="stocks", show_default=True, help="Market to scan.")
     @click.option("--timeframe", default="1D", show_default=True, help="Timeframe to scan.")
