@@ -1,5 +1,6 @@
 import base64
 import binascii
+import logging
 from datetime import datetime
 from pathlib import Path
 
@@ -12,6 +13,8 @@ from backend.services import scans
 from backend.services.patternDetection import signalResolver, yoloService
 from backend.services.redis_store import get_redis_client
 from backend.symbols import canonicalize_symbol
+
+logger = logging.getLogger(__name__)
 
 PATTERN_RATE_LIMIT = 10
 PATTERN_RATE_WINDOW_SECONDS = 60
@@ -27,6 +30,21 @@ PATTERN_LOG_HEADERS = [
     "talib_conflict",
     "screenshot_path",
 ]
+
+
+def _import_cv2():
+    try:
+        import cv2
+    except Exception as exc:
+        logger.exception(
+            "opencv_import_failed",
+            extra={
+                "exception_type": type(exc).__name__,
+                "exception_message": str(exc),
+            },
+        )
+        raise ApiError("OpenCV is not installed", 503, "opencv_unavailable") from exc
+    return cv2
 
 
 def detect_pattern_for_user(user, data):
@@ -60,10 +78,7 @@ def detect_pattern_for_user(user, data):
 
 
 def decode_base64_image(encoded_image):
-    try:
-        import cv2
-    except ImportError as exc:
-        raise ApiError("OpenCV is not installed", 503, "opencv_unavailable") from exc
+    cv2 = _import_cv2()
 
     payload = encoded_image.split(",", 1)[1] if encoded_image.startswith("data:") else encoded_image
     try:
@@ -88,10 +103,7 @@ def get_talib_patterns(symbol, timeframe):
 
 
 def save_annotated_screenshot(user_id, timestamp, image, bounding_boxes):
-    try:
-        import cv2
-    except ImportError as exc:
-        raise ApiError("OpenCV is not installed", 503, "opencv_unavailable") from exc
+    cv2 = _import_cv2()
 
     root = _pattern_log_root()
     screenshot_dir = root / str(user_id) / "screenshots"
