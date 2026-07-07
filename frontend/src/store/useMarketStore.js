@@ -2,6 +2,9 @@ import { create } from 'zustand';
 import toast from 'react-hot-toast';
 import { marketAPI, notificationAPI, scanTemplateAPI, watchlistAPI } from '../services/api';
 
+const MAX_SCAN_WAIT_MS = 20 * 60 * 1000;
+const MAX_QUEUED_WAIT_MS = 2 * 60 * 1000;
+
 let searchAbortController = null;
 
 const useMarketStore = create((set, get) => ({
@@ -158,15 +161,27 @@ const useMarketStore = create((set, get) => ({
       });
       const jobId = data.job_id;
       let statusPayload = { status: 'queued', progress: 0 };
+      const startedAt = Date.now();
+      let queuedSince = Date.now();
 
       while (!['completed', 'failed', 'canceled'].includes(statusPayload.status)) {
         await new Promise(resolve => setTimeout(resolve, 1000));
         const response = await marketAPI.getScanStatus(jobId);
         statusPayload = response.data;
+        if (statusPayload.status !== 'queued') queuedSince = Date.now();
+
+        if (Date.now() - startedAt > MAX_SCAN_WAIT_MS) {
+          throw new Error('Scan timed out. Please try again with fewer filters or a smaller market.');
+        }
+        if (statusPayload.status === 'queued' && Date.now() - queuedSince > MAX_QUEUED_WAIT_MS) {
+          throw new Error('Scan is still queued. The background worker may be unavailable; please try again shortly.');
+        }
+
+        const detail = statusPayload.current_symbol ? ` - ${statusPayload.current_symbol}` : '';
         set({
           scanResults: statusPayload.results || [],
           scanMeta: statusPayload.meta || null,
-          scanProgress: `Scan ${statusPayload.status} (${statusPayload.progress || 0}%)`,
+          scanProgress: `Scan ${statusPayload.status} (${statusPayload.progress || 0}%)${detail}`,
         });
       }
 

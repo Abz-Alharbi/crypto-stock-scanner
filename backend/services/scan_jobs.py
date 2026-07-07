@@ -45,7 +45,36 @@ def set_scan_job_state(scan_job_id, **updates):
 
 
 def get_scan_job_state(job_id):
-    return redis_get_json(_state_key(job_id))
+    state = redis_get_json(_state_key(job_id))
+    if not state or state.get("status") in {"completed", "failed", "canceled"}:
+        return state
+
+    client = get_redis_client()
+    if client is None:
+        return state
+
+    try:
+        job = Job.fetch(job_id, connection=client)
+    except NoSuchJobError:
+        created_at = float(state.get("created_at") or 0)
+        if created_at and time.time() - created_at > 30:
+            return set_scan_job_state(
+                job_id,
+                status="failed",
+                error="Scan job disappeared from the queue. Please restart the worker service and try again.",
+            )
+        return state
+
+    rq_status = job.get_status(refresh=True)
+    if rq_status == "failed":
+        error = job.exc_info or "The scan worker failed before it could report progress."
+        return set_scan_job_state(job_id, status="failed", error=str(error).splitlines()[-1])
+    if rq_status in {"canceled", "stopped"}:
+        return set_scan_job_state(job_id, status="canceled")
+    if state.get("status") == "queued" and rq_status in {"started", "busy"}:
+        return set_scan_job_state(job_id, status="running", progress=state.get("progress", 1))
+
+    return state
 
 
 def require_scan_job_for_user(job_id, user):
