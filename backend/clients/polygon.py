@@ -4,6 +4,7 @@ import os
 import random
 import time
 from datetime import datetime, timedelta
+from urllib.parse import urlencode
 
 import requests
 
@@ -34,6 +35,37 @@ class PolygonClient:
         self.consecutive_failures = 0
         self.circuit_open_until = 0
         self._snapshot_indexes = {}
+        self.last_error = None
+
+    def _debug_enabled(self):
+        return os.getenv("POLYGON_DEBUG", "false").lower() == "true"
+
+    @staticmethod
+    def _safe_params(params=None):
+        safe = dict(params or {})
+        if "apiKey" in safe:
+            safe["apiKey"] = "<redacted>"
+        return safe
+
+    def _debug_log_response(self, endpoint, status_code, body):
+        if not self._debug_enabled():
+            return
+        logger.info(
+            "polygon_response",
+            extra={
+                "endpoint": endpoint,
+                "status_code": status_code,
+                "body": str(body)[:1000],
+            },
+        )
+
+    def _set_error(self, error_type, message, status_code=None, endpoint=None):
+        self.last_error = {
+            "type": error_type,
+            "message": message,
+            "status_code": status_code,
+            "endpoint": endpoint,
+        }
 
     def _rate_limit(self):
         wait_for_rate_limit("polygon", RATE_LIMIT_MAX_CALLS, RATE_LIMIT_WINDOW_SECONDS)
@@ -60,21 +92,38 @@ class PolygonClient:
         return min(CIRCUIT_BREAKER_PAUSE_SECONDS, backoff + jitter)
 
     def _request(self, endpoint, params=None):
+        if not self.api_key:
+            self._set_error("missing_api_key", "POLYGON_API_KEY is not configured", endpoint=endpoint)
+            logger.error("polygon_api_key_missing", extra={"endpoint": endpoint})
+            return None
+
         cache_key = f"polygon:{endpoint}:{json.dumps(params or {}, sort_keys=True)}"
         cached = cache_get(cache_key)
         if cached is not None:
+            self.last_error = None
             return cached
 
         if self._is_circuit_open():
+            self._set_error("circuit_open", "Polygon circuit breaker is open", endpoint=endpoint)
             logger.warning("Polygon circuit breaker is open; skipping request to %s", endpoint)
             return None
 
         url = f"{self.base_url}{endpoint}"
+        if self._debug_enabled():
+            logger.info(
+                "polygon_request",
+                extra={
+                    "url": url,
+                    "params": self._safe_params(params),
+                    "api_key_configured": bool(self.api_key),
+                },
+            )
         for attempt in range(MAX_RETRIES + 1):
             self._rate_limit()
             try:
                 resp = self.session.get(url, params=params or {}, timeout=REQUEST_TIMEOUT_SECONDS)
             except (requests.Timeout, requests.ConnectionError) as exc:
+                self._set_error("network_error", str(exc), endpoint=endpoint)
                 if self._record_failure():
                     return None
                 if attempt >= MAX_RETRIES:
@@ -85,17 +134,21 @@ class PolygonClient:
                 time.sleep(delay)
                 continue
             except requests.RequestException as exc:
+                self._set_error("request_error", str(exc), endpoint=endpoint)
                 self._record_failure()
                 logger.error("Polygon request failed: %s", exc)
                 return None
 
+            self._debug_log_response(endpoint, resp.status_code, resp.text)
             if resp.status_code == 200:
                 data = resp.json()
                 cache_set(cache_key, data)
                 self._record_success()
+                self.last_error = None
                 return data
 
             if resp.status_code == 429 and attempt < MAX_RETRIES:
+                self._set_error("rate_limited", resp.text[:300], status_code=resp.status_code, endpoint=endpoint)
                 if self._record_failure():
                     return None
                 wait_for_rate_limit("polygon_429", 1, 60)
@@ -104,6 +157,7 @@ class PolygonClient:
                 time.sleep(delay)
                 continue
 
+            self._set_error("http_error", resp.text[:300], status_code=resp.status_code, endpoint=endpoint)
             if self._record_failure():
                 return None
             logger.error("Polygon API error %s: %s", resp.status_code, resp.text[:200])
@@ -136,8 +190,8 @@ class PolygonClient:
 
         snapshot = index.get(ticker.upper())
         if snapshot is None:
-            logger.info("polygon_ohlcv_skipped", extra={"ticker": ticker, "reason": "missing_snapshot"})
-            return False
+            logger.info("polygon_snapshot_missing", extra={"ticker": ticker, "action": "fallback_to_aggregates"})
+            return True
 
         day = snapshot.get("day") or snapshot.get("prevDay") or {}
         volume = day.get("v") if "v" in day else snapshot.get("volume")
@@ -161,6 +215,30 @@ class PolygonClient:
         if data and data.get("results"):
             return data["results"]
         return []
+
+    def debug_aggregates_raw(self, ticker, from_date, to_date, timespan="day", multiplier=1):
+        if not self.api_key:
+            return {
+                "status_code": None,
+                "url": f"{self.base_url}/v2/aggs/ticker/{ticker}/range/{multiplier}/{timespan}/{from_date}/{to_date}",
+                "params": {"adjusted": "true", "sort": "asc", "limit": 50000, "apiKey": "<missing>"},
+                "body": "POLYGON_API_KEY is not configured",
+            }
+
+        endpoint = f"/v2/aggs/ticker/{ticker}/range/{multiplier}/{timespan}/{from_date}/{to_date}"
+        params = {"adjusted": "true", "sort": "asc", "limit": 50000}
+        response = self.session.get(
+            f"{self.base_url}{endpoint}",
+            params=params,
+            timeout=REQUEST_TIMEOUT_SECONDS,
+        )
+        return {
+            "status_code": response.status_code,
+            "url": f"{self.base_url}{endpoint}",
+            "params": self._safe_params({**params, "apiKey": self.api_key}),
+            "body": response.text[:5000],
+            "full_url_redacted": f"{self.base_url}{endpoint}?{urlencode(self._safe_params({**params, 'apiKey': self.api_key}))}",
+        }
 
     def get_snapshot_stocks(self):
         """Get snapshot of all stock tickers (single API call)."""

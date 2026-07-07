@@ -88,15 +88,23 @@ class PolygonClientTests(unittest.TestCase):
         self.assertGreater(client.circuit_open_until, 0)
         self.assertTrue(all(call["timeout"] == REQUEST_TIMEOUT_SECONDS for call in client.session.calls))
 
-    def test_snapshot_preflight_skips_missing_ticker_before_ohlcv(self):
+    def test_snapshot_preflight_falls_back_when_ticker_missing(self):
         client = PolygonClient("test-key")
         client._snapshot_indexes["stocks"] = {"MSFT": {"ticker": "MSFT", "day": {"v": 100}}}
 
-        with patch.object(client, "_request") as request:
+        with patch.object(client, "_request", return_value={"results": [{"c": 10}]}) as request:
             result = client.get_aggregates("AAPL")
 
-        self.assertEqual(result, [])
-        request.assert_not_called()
+        self.assertEqual(result, [{"c": 10}])
+        request.assert_called_once()
+
+    def test_missing_api_key_sets_provider_error(self):
+        client = PolygonClient("")
+
+        result = client._request("/v2/example", {"symbol": "AAPL"})
+
+        self.assertIsNone(result)
+        self.assertEqual(client.last_error["type"], "missing_api_key")
 
 
 if __name__ == "__main__":

@@ -127,6 +127,21 @@ def _register_cli(app):
         db.session.commit()
         click.echo("Seeded local development data.")
 
+    @app.cli.command("debug-polygon")
+    @click.option("--symbol", default="AAPL", show_default=True, help="Ticker to fetch.")
+    @click.option("--days", default=10, show_default=True, help="Calendar days to include.")
+    def debug_polygon_command(symbol, days):
+        """Fetch raw Polygon aggregate data with the API key redacted."""
+        import json
+        from datetime import datetime, timedelta
+
+        from backend.clients.polygon import polygon
+
+        to_date = datetime.utcnow().date()
+        from_date = to_date - timedelta(days=int(days))
+        payload = polygon.debug_aggregates_raw(symbol.upper(), str(from_date), str(to_date))
+        click.echo(json.dumps(payload, indent=2))
+
 
 def create_app(config=None):
     configure_logging()

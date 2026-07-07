@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import time
 from datetime import datetime, timedelta
 
@@ -46,6 +47,19 @@ ALL_STOCK_SYMBOLS = NASDAQ_SYMBOLS + NYSE_SYMBOLS
 # ============================================================
 TIMEFRAME_MAP = TIMEFRAME_CONFIG
 INTRADAY_KEYS = INTRADAY_TIMEFRAMES
+
+
+def _scan_debug_enabled():
+    return os.getenv("SCAN_DEBUG", "false").lower() == "true"
+
+
+def _scan_debug_sample_limit():
+    return int(os.getenv("SCAN_DEBUG_SAMPLE_LIMIT", "8"))
+
+
+def _debug_scan_log(message, **payload):
+    if _scan_debug_enabled():
+        logger.info(message, extra=payload)
 
 
 def get_bars(symbol, timeframe='1D'):
@@ -305,6 +319,12 @@ def scan_market(market, selected_filters, timeframe, max_results, user_id=None, 
             "paid_plan_required",
             {"upgrade_hint": True},
         )
+    if not polygon.api_key:
+        raise ApiError(
+            "Polygon API key is not configured. Set POLYGON_API_KEY in Railway backend and worker variables.",
+            503,
+            "provider_not_configured",
+        )
 
     symbols = CRYPTO_SYMBOLS if market == "crypto" else ALL_STOCK_SYMBOLS
     flat_filters = get_flat_filters()
@@ -314,9 +334,25 @@ def scan_market(market, selected_filters, timeframe, max_results, user_id=None, 
 
     start_time = time.time()
     results = []
+    attempted = 0
     scanned = 0
     errors = 0
+    no_data = 0
+    insufficient_data = 0
+    analysis_failures = 0
     total_symbols = len(symbols)
+
+    logger.info(
+        "scan_started",
+        extra={
+            "job_id": job_id,
+            "market": market,
+            "timeframe": timeframe,
+            "total_symbols": total_symbols,
+            "filters": valid_filters,
+            "max_results": max_results,
+        },
+    )
 
     _emit_scan_progress(progress_callback, progress=0, scanned=0, total=total_symbols)
 
@@ -335,13 +371,33 @@ def scan_market(market, selected_filters, timeframe, max_results, user_id=None, 
         )
 
         try:
+            attempted += 1
             bars = get_bars(symbol, timeframe)
             if not bars or len(bars) < 30:
+                if not bars:
+                    no_data += 1
+                else:
+                    insufficient_data += 1
+                _debug_scan_log(
+                    "scan_symbol_data_rejected",
+                    job_id=job_id,
+                    symbol=symbol,
+                    bars=len(bars or []),
+                    reason="no_data" if not bars else "insufficient_data",
+                    provider_error=getattr(polygon, "last_error", None),
+                )
                 errors += 1
                 continue
 
             analysis = ta.full_analysis(bars)
             if not analysis:
+                analysis_failures += 1
+                _debug_scan_log(
+                    "scan_symbol_analysis_empty",
+                    job_id=job_id,
+                    symbol=symbol,
+                    bars=len(bars),
+                )
                 errors += 1
                 continue
 
@@ -353,6 +409,18 @@ def scan_market(market, selected_filters, timeframe, max_results, user_id=None, 
                         matched_filters.append(filter_key)
                 except Exception:
                     pass
+
+            if _scan_debug_enabled() and scanned <= _scan_debug_sample_limit():
+                _debug_scan_log(
+                    "scan_symbol_filter_result",
+                    job_id=job_id,
+                    symbol=symbol,
+                    bars=len(bars),
+                    filters=valid_filters,
+                    matched_filters=matched_filters,
+                    price=analysis.get("price"),
+                    overall_signal=analysis.get("overall_signal"),
+                )
 
             if matched_filters:
                 canonical = canonicalize_symbol(symbol, market)
@@ -417,6 +485,39 @@ def scan_market(market, selected_filters, timeframe, max_results, user_id=None, 
 
     duration = time.time() - start_time
 
+    if scanned == 0:
+        provider_error = getattr(polygon, "last_error", None)
+        logger.error(
+            "scan_no_symbols_analyzed",
+            extra={
+                "job_id": job_id,
+                "market": market,
+                "timeframe": timeframe,
+                "total_symbols": total_symbols,
+                "attempted": attempted,
+                "no_data": no_data,
+                "insufficient_data": insufficient_data,
+                "analysis_failures": analysis_failures,
+                "errors": errors,
+                "provider_error": provider_error,
+            },
+        )
+        raise ApiError(
+            "No usable market data was returned by Polygon. Check POLYGON_API_KEY, plan access, and timeframe.",
+            502,
+            "provider_data_unavailable",
+            {
+                "market": market,
+                "timeframe": timeframe,
+                "total_symbols": total_symbols,
+                "attempted": attempted,
+                "no_data": no_data,
+                "insufficient_data": insufficient_data,
+                "analysis_failures": analysis_failures,
+                "provider_error": provider_error,
+            },
+        )
+
     try:
         history = ScanHistory(
             user_id=user_id,
@@ -448,8 +549,13 @@ def scan_market(market, selected_filters, timeframe, max_results, user_id=None, 
             "market": market,
             "timeframe": timeframe,
             "total_scanned": scanned,
+            "total_attempted": attempted,
+            "total_symbols": total_symbols,
             "total_matched": len(results),
             "errors": errors,
+            "no_data": no_data,
+            "insufficient_data": insufficient_data,
+            "analysis_failures": analysis_failures,
             "duration_seconds": round(duration, 2),
             "filters_applied": valid_filters,
         },

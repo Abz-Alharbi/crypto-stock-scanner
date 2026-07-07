@@ -136,3 +136,45 @@ def test_search_route_uses_mocked_polygon_client(client):
     results = response.get_json()["results"]
     assert results[0]["provider_symbol"] == "AAPL"
     assert results[0]["name"] == "Apple Inc."
+
+
+def test_scan_route_completes_with_mocked_polygon_data(client, monkeypatch):
+    from backend.services import scan_jobs
+
+    state_store = {}
+
+    monkeypatch.setattr(scan_jobs, "redis_get_json", lambda key: state_store.get(key))
+    monkeypatch.setattr(
+        scan_jobs,
+        "redis_set_json",
+        lambda key, value, ttl=None: state_store.__setitem__(key, value) or True,
+    )
+    monkeypatch.setattr(scan_jobs, "redis_set_value", lambda *args, **kwargs: True)
+    monkeypatch.setattr(scan_jobs, "redis_exists", lambda key: False)
+    monkeypatch.setenv("SCAN_QUEUE_SYNC", "true")
+
+    register_response = client.post(
+        "/api/auth/register",
+        json={
+            "username": "scan_user",
+            "email": "scan@example.test",
+            "password": "Password123",
+        },
+    )
+    headers = _bearer(register_response.get_json()["token"])
+
+    scan_response = client.post(
+        "/api/scan",
+        json={"market": "stocks", "timeframe": "1D", "filters": ["macd_bullish"], "limit": 3},
+        headers=headers,
+    )
+
+    assert scan_response.status_code == 202, scan_response.get_json()
+    job_id = scan_response.get_json()["job_id"]
+
+    status_response = client.get(f"/api/scan/status/{job_id}", headers=headers)
+    assert status_response.status_code == 200
+    payload = status_response.get_json()
+    assert payload["status"] == "completed"
+    assert payload["results"]
+    assert payload["meta"]["total_scanned"] >= 1
