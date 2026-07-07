@@ -340,6 +340,7 @@ def scan_market(market, selected_filters, timeframe, max_results, user_id=None, 
     no_data = 0
     insufficient_data = 0
     analysis_failures = 0
+    symbol_failures = []
     total_symbols = len(symbols)
 
     logger.info(
@@ -470,7 +471,10 @@ def scan_market(market, selected_filters, timeframe, max_results, user_id=None, 
                     pass
 
         except Exception as exc:
-            logger.error("Error scanning %s: %s", symbol, exc)
+            analysis_failures += 1
+            if len(symbol_failures) < 5:
+                symbol_failures.append({"symbol": symbol, "error": str(exc)})
+            logger.exception("scan_symbol_failed", extra={"job_id": job_id, "symbol": symbol})
             errors += 1
 
         _emit_scan_progress(
@@ -487,6 +491,7 @@ def scan_market(market, selected_filters, timeframe, max_results, user_id=None, 
 
     if scanned == 0:
         provider_error = getattr(polygon, "last_error", None)
+        provider_only_failure = attempted > 0 and (no_data + insufficient_data) == attempted
         logger.error(
             "scan_no_symbols_analyzed",
             extra={
@@ -500,8 +505,25 @@ def scan_market(market, selected_filters, timeframe, max_results, user_id=None, 
                 "analysis_failures": analysis_failures,
                 "errors": errors,
                 "provider_error": provider_error,
+                "symbol_failures": symbol_failures,
             },
         )
+        if not provider_only_failure:
+            raise ApiError(
+                "Scan failed while analyzing market data. Check worker logs for scan_symbol_failed.",
+                500,
+                "scan_analysis_failed",
+                {
+                    "market": market,
+                    "timeframe": timeframe,
+                    "total_symbols": total_symbols,
+                    "attempted": attempted,
+                    "no_data": no_data,
+                    "insufficient_data": insufficient_data,
+                    "analysis_failures": analysis_failures,
+                    "symbol_failures": symbol_failures,
+                },
+            )
         raise ApiError(
             "No usable market data was returned by Polygon. Check POLYGON_API_KEY, plan access, and timeframe.",
             502,
@@ -515,6 +537,7 @@ def scan_market(market, selected_filters, timeframe, max_results, user_id=None, 
                 "insufficient_data": insufficient_data,
                 "analysis_failures": analysis_failures,
                 "provider_error": provider_error,
+                "symbol_failures": symbol_failures,
             },
         )
 
@@ -556,6 +579,7 @@ def scan_market(market, selected_filters, timeframe, max_results, user_id=None, 
             "no_data": no_data,
             "insufficient_data": insufficient_data,
             "analysis_failures": analysis_failures,
+            "symbol_failures": symbol_failures,
             "duration_seconds": round(duration, 2),
             "filters_applied": valid_filters,
         },
