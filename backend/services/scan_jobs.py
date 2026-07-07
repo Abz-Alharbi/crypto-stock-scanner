@@ -136,7 +136,7 @@ def enqueue_scan_job(user_id, data):
         run_scan_job(job_id, user_id, data.market, data.filters, data.timeframe, data.limit)
         return job_id
 
-    from backend.jobs.scan_jobs import run_scan_job
+    from worker import run_scan_job
 
     queue = get_scan_queue()
     queue.enqueue(

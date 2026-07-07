@@ -122,7 +122,7 @@ def schedule_next_template_sweep(delay_seconds=None):
     if not client.set(SCHEDULE_MARKER_KEY, "1", ex=marker_ttl, nx=True):
         return False
 
-    from backend.jobs.template_jobs import evaluate_scan_templates_job
+    from worker import evaluate_scan_templates_job
 
     queue = get_scan_queue()
     queue.enqueue_in(
