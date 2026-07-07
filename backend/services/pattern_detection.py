@@ -54,7 +54,11 @@ def detect_pattern_for_user(user, data):
     try:
         yolo_results = yoloService.detect_patterns(mat)
     except RuntimeError as exc:
-        raise ApiError(str(exc), 503, "yolo_unavailable") from exc
+        details = getattr(yoloService.get_yolo_service(), "last_error", None)
+        message = str(exc)
+        if isinstance(details, dict) and details.get("exception_message"):
+            message = f"{message} {details['exception_message']}"
+        raise ApiError(message, 503, "yolo_unavailable", details) from exc
     talib_patterns = []
     symbol = data.symbol
     timeframe = data.timeframe

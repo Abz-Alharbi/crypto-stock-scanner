@@ -78,13 +78,19 @@ You should see:
 
 ### YOLOv8 Chart Pattern Model
 
-Download `model.pt` from https://huggingface.co/foduucom/stockmarket-pattern-detection-yolov8 and place it at:
+The backend can automatically download `model.pt` from
+https://huggingface.co/foduucom/stockmarket-pattern-detection-yolov8 on startup
+or the first pattern-detection request. To install it manually, place it at:
 
 ```text
 models/yolov8/model.pt
 ```
 
-The backend loads this model once at app startup. The browser captures/crops chart imagery on the client and sends image data to the backend; the YOLO service accepts a decoded numpy/OpenCV image buffer, not server-side screen capture.
+The backend loads this model once at app startup, and retries lazily if the
+file was missing during startup. Set `YOLO_MODEL_URL`, `YOLO_MODEL_PATH`, or
+`YOLO_AUTO_DOWNLOAD=false` to override this behavior. The browser captures/crops
+chart imagery on the client and sends image data to the backend; the YOLO
+service accepts a decoded NumPy image buffer, not server-side screen capture.
 
 ---
 

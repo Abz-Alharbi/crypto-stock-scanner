@@ -4,7 +4,6 @@ Flask-SQLAlchemy==3.1.1
 SQLAlchemy==2.0.36
 pandas==2.2.3
 numpy==2.1.1
-opencv-python-headless==4.11.0.86
 Pillow==12.3.0
 openpyxl==3.1.5
 requests==2.33.0
@@ -19,3 +18,4 @@ psycopg2-binary==2.9.10
 redis==5.1.1
 rq==2.10.0
 ultralytics==8.3.94
+opencv-python-headless==4.11.0.86

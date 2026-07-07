@@ -173,6 +173,32 @@ def _register_cli(app):
             )
         )
 
+    @app.cli.command("debug-yolo")
+    @click.option("--load/--no-load", default=True, show_default=True, help="Attempt to download/load the model.")
+    def debug_yolo_command(load):
+        """Report YOLOv8 model path, download, and load status."""
+        import json
+
+        from backend.services.patternDetection.yoloService import get_yolo_service
+
+        service = get_yolo_service()
+        if load:
+            service.load_model()
+
+        click.echo(
+            json.dumps(
+                {
+                    "loaded": service.is_loaded,
+                    "model_path": str(service.model_path),
+                    "model_exists": service.model_path.exists(),
+                    "model_url": service.model_url,
+                    "auto_download": service.auto_download,
+                    "last_error": service.last_error,
+                },
+                indent=2,
+            )
+        )
+
     @app.cli.command("debug-scan")
     @click.option("--market", default="stocks", show_default=True, help="Market to scan.")
     @click.option("--timeframe", default="1D", show_default=True, help="Timeframe to scan.")
@@ -249,7 +275,11 @@ def create_app(config=None):
     with app.app_context():
         from backend.services.patternDetection.yoloService import initialize_yolo_service
 
-        initialize_yolo_service(app.config.get("YOLO_MODEL_PATH"))
+        initialize_yolo_service(
+            app.config.get("YOLO_MODEL_PATH"),
+            app.config.get("YOLO_MODEL_URL"),
+            app.config.get("YOLO_AUTO_DOWNLOAD"),
+        )
 
     if app.config.get("ENABLE_SCAN_TEMPLATE_SCHEDULER"):
         with app.app_context():

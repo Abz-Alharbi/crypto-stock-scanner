@@ -62,17 +62,22 @@ docker compose logs --tail=100 backend
 
 ## YOLOv8 Model Download And Update
 
-The model is intentionally excluded from Git. Download it from:
+The model is intentionally excluded from Git. In production the backend can
+auto-download it from:
 
 ```text
 https://huggingface.co/foduucom/stockmarket-pattern-detection-yolov8
 ```
 
-Place the file at:
+By default it is stored at:
 
 ```text
 models/yolov8/model.pt
 ```
+
+Override the source or path with `YOLO_MODEL_URL` and `YOLO_MODEL_PATH`. Set
+`YOLO_AUTO_DOWNLOAD=false` only when you are mounting or copying the model
+manually.
 
 To update the model:
 
@@ -86,6 +91,12 @@ Confirm readiness after the backend reloads the model:
 
 ```bash
 curl http://localhost:5000/ready
+```
+
+On Railway, check model download/load status with:
+
+```bash
+flask --app backend.app debug-yolo
 ```
 
 Expected ready response when the database is reachable and `model.pt` is loaded:

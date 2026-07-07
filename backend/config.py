@@ -26,6 +26,14 @@ class BaseConfig:
     SMTP_FROM = os.getenv("SMTP_FROM", "")
     SMTP_USE_TLS = os.getenv("SMTP_USE_TLS", "true").lower() == "true"
     YOLO_MODEL_PATH = os.getenv("YOLO_MODEL_PATH", "models/yolov8/model.pt")
+    YOLO_MODEL_URL = os.getenv(
+        "YOLO_MODEL_URL",
+        "https://huggingface.co/foduucom/stockmarket-pattern-detection-yolov8/resolve/main/model.pt",
+    )
+    YOLO_AUTO_DOWNLOAD = os.getenv(
+        "YOLO_AUTO_DOWNLOAD",
+        "false" if os.getenv("FLASK_ENV", "").lower() in {"test", "testing"} else "true",
+    ).lower() == "true"
     YOLO_CONFIDENCE_THRESHOLD = float(os.getenv("YOLO_CONFIDENCE_THRESHOLD", "0.50"))
     PATTERN_LOG_ROOT = os.getenv("PATTERN_LOG_ROOT", "logs/pattern_detections")
     UNIVERSE_NASDAQ_SIZE = int(os.getenv("UNIVERSE_NASDAQ_SIZE", "500"))

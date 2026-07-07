@@ -4,12 +4,15 @@ import threading
 from pathlib import Path
 
 import numpy as np
+import requests
 
 logger = logging.getLogger(__name__)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_MODEL_PATH = PROJECT_ROOT / "models" / "yolov8" / "model.pt"
+DEFAULT_MODEL_URL = "https://huggingface.co/foduucom/stockmarket-pattern-detection-yolov8/resolve/main/model.pt"
 DEFAULT_CONFIDENCE_THRESHOLD = 0.50
+MIN_MODEL_BYTES = 1_000_000
 
 
 def _env_confidence_threshold():
@@ -19,9 +22,23 @@ def _env_confidence_threshold():
         return DEFAULT_CONFIDENCE_THRESHOLD
 
 
+def _env_bool(name, default):
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
 class YOLOPatternService:
-    def __init__(self, model_path=None, confidence_threshold=None, model_loader=None):
+    def __init__(self, model_path=None, confidence_threshold=None, model_loader=None, model_url=None, auto_download=None):
         self.model_path = _resolve_model_path(model_path or os.getenv("YOLO_MODEL_PATH") or DEFAULT_MODEL_PATH)
+        self.model_url = model_url or os.getenv("YOLO_MODEL_URL") or DEFAULT_MODEL_URL
+        default_auto_download = os.getenv("FLASK_ENV", "").lower() != "testing"
+        self.auto_download = (
+            _env_bool("YOLO_AUTO_DOWNLOAD", default_auto_download)
+            if auto_download is None
+            else bool(auto_download)
+        )
         self.confidence_threshold = (
             _env_confidence_threshold()
             if confidence_threshold is None
@@ -30,6 +47,7 @@ class YOLOPatternService:
         self.model_loader = model_loader
         self._model = None
         self._lock = threading.Lock()
+        self.last_error = None
 
     @property
     def is_loaded(self):
@@ -41,13 +59,82 @@ class YOLOPatternService:
                 return self._model
 
             if not self.model_path.exists():
-                logger.warning("YOLOv8 model not found at %s; pattern detection is disabled.", self.model_path)
-                return None
+                if self.auto_download:
+                    self._download_model()
+                if not self.model_path.exists():
+                    self.last_error = {
+                        "type": "model_missing",
+                        "model_path": str(self.model_path),
+                        "model_url": self.model_url,
+                    }
+                    logger.warning(
+                        "YOLOv8 model not found at %s; pattern detection is disabled.",
+                        self.model_path,
+                        extra=self.last_error,
+                    )
+                    return None
 
             loader = self.model_loader or self._load_ultralytics_model
-            self._model = loader(str(self.model_path))
+            try:
+                self._model = loader(str(self.model_path))
+            except Exception as exc:
+                self.last_error = {
+                    "type": "model_load_failed",
+                    "model_path": str(self.model_path),
+                    "exception_type": type(exc).__name__,
+                    "exception_message": str(exc),
+                }
+                logger.exception("yolo_model_load_failed", extra=self.last_error)
+                return None
+
+            self.last_error = None
             logger.info("yolo_model_loaded", extra={"model_path": str(self.model_path)})
             return self._model
+
+    def _download_model(self):
+        if not self.model_url:
+            return False
+
+        self.model_path.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = self.model_path.with_suffix(f"{self.model_path.suffix}.download")
+        try:
+            logger.info(
+                "yolo_model_download_started",
+                extra={"model_url": self.model_url, "model_path": str(self.model_path)},
+            )
+            with requests.get(self.model_url, stream=True, timeout=(10, 120)) as response:
+                response.raise_for_status()
+                bytes_written = 0
+                with temp_path.open("wb") as handle:
+                    for chunk in response.iter_content(chunk_size=1024 * 1024):
+                        if not chunk:
+                            continue
+                        handle.write(chunk)
+                        bytes_written += len(chunk)
+
+            if bytes_written < MIN_MODEL_BYTES:
+                raise RuntimeError(f"Downloaded model is too small ({bytes_written} bytes)")
+
+            temp_path.replace(self.model_path)
+            logger.info(
+                "yolo_model_downloaded",
+                extra={"model_path": str(self.model_path), "bytes": bytes_written},
+            )
+            return True
+        except Exception as exc:
+            try:
+                temp_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+            self.last_error = {
+                "type": "model_download_failed",
+                "model_url": self.model_url,
+                "model_path": str(self.model_path),
+                "exception_type": type(exc).__name__,
+                "exception_message": str(exc),
+            }
+            logger.exception("yolo_model_download_failed", extra=self.last_error)
+            return False
 
     def detect(self, image, confidence_threshold=None):
         if not isinstance(image, np.ndarray):
@@ -55,7 +142,7 @@ class YOLOPatternService:
         if image.ndim not in {2, 3}:
             raise ValueError("YOLO pattern detection expects a 2D or 3D image array.")
 
-        model = self._model
+        model = self._model or self.load_model()
         if model is None:
             raise RuntimeError("YOLOv8 pattern model is not loaded.")
 
@@ -154,10 +241,14 @@ def get_yolo_service():
     return _singleton
 
 
-def initialize_yolo_service(model_path=None):
+def initialize_yolo_service(model_path=None, model_url=None, auto_download=None):
     service = get_yolo_service()
     if model_path:
         service.model_path = _resolve_model_path(model_path)
+    if model_url:
+        service.model_url = model_url
+    if auto_download is not None:
+        service.auto_download = bool(auto_download)
     return service.load_model()
 
 
