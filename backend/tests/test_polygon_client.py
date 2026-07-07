@@ -35,12 +35,10 @@ class PolygonClientTests(unittest.TestCase):
     def setUp(self):
         self.cache_get = patch("backend.clients.polygon.cache_get", return_value=None)
         self.cache_set = patch("backend.clients.polygon.cache_set")
-        self.rate_limit = patch("backend.clients.polygon.wait_for_rate_limit")
         self.sleep = patch("backend.clients.polygon.time.sleep")
         self.jitter = patch("backend.clients.polygon.random.uniform", return_value=0)
         self.cache_get.start()
         self.cache_set.start()
-        self.rate_limit.start()
         self.sleep.start()
         self.jitter.start()
 
@@ -120,6 +118,22 @@ class PolygonClientTests(unittest.TestCase):
 
         self.assertEqual(result, [{"c": 10}])
         snapshot.assert_not_called()
+
+    def test_reference_tickers_paginates_next_url(self):
+        client = PolygonClient("test-key")
+        client.session = FakeSession(
+            [
+                FakeResponse(200, {"results": [{"ticker": "AAA"}], "next_url": "https://api.polygon.io/v3/reference/tickers?cursor=next"}),
+                FakeResponse(200, {"results": [{"ticker": "BBB"}]}),
+            ]
+        )
+
+        result = client.get_reference_tickers("XNAS")
+
+        self.assertEqual(result, [{"ticker": "AAA"}, {"ticker": "BBB"}])
+        self.assertEqual(len(client.session.calls), 2)
+        self.assertEqual(client.session.calls[0]["params"]["exchange"], "XNAS")
+        self.assertEqual(client.session.calls[1]["params"], {})
 
 
 if __name__ == "__main__":

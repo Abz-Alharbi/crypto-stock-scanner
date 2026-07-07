@@ -28,6 +28,11 @@ class BaseConfig:
     YOLO_MODEL_PATH = os.getenv("YOLO_MODEL_PATH", "models/yolov8/model.pt")
     YOLO_CONFIDENCE_THRESHOLD = float(os.getenv("YOLO_CONFIDENCE_THRESHOLD", "0.50"))
     PATTERN_LOG_ROOT = os.getenv("PATTERN_LOG_ROOT", "logs/pattern_detections")
+    UNIVERSE_NASDAQ_SIZE = int(os.getenv("UNIVERSE_NASDAQ_SIZE", "500"))
+    UNIVERSE_NYSE_SIZE = int(os.getenv("UNIVERSE_NYSE_SIZE", "300"))
+    UNIVERSE_LOOKBACK_DAYS = int(os.getenv("UNIVERSE_LOOKBACK_DAYS", "730"))
+    UNIVERSE_REFRESH_CRON = os.getenv("UNIVERSE_REFRESH_CRON", "weekly")
+    ENABLE_UNIVERSE_REFRESH_SCHEDULER = os.getenv("ENABLE_UNIVERSE_REFRESH_SCHEDULER", "false").lower() == "true"
 
 
 class DevelopmentConfig(BaseConfig):

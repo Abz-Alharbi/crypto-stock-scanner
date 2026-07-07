@@ -27,12 +27,12 @@ export default function ScanResults() {
   if (isScanning) {
     return (
       <div className="bg-scanner-card border border-scanner-border rounded-2xl p-8">
-        <LoadingSpinner size="lg" text={scanProgress || 'Scanning markets... (this may take a few minutes on free tier)'} />
+        <LoadingSpinner size="lg" text={scanProgress || 'Scanning markets...'} />
         <div className="mt-4 max-w-md mx-auto">
           <div className="h-1.5 bg-scanner-bg rounded-full overflow-hidden">
             <div className="h-full bg-gradient-to-r from-scanner-accent to-emerald-500 rounded-full animate-pulse" style={{ width: '60%' }} />
           </div>
-          <p className="text-center text-[10px] text-scanner-text-dim mt-2">Rate limited to 5 API calls/minute on free tier</p>
+          <p className="text-center text-[10px] text-scanner-text-dim mt-2">Scanning the configured universe with controlled Polygon concurrency</p>
         </div>
       </div>
     );
@@ -47,6 +47,12 @@ export default function ScanResults() {
           <p className="text-sm text-scanner-text-dim mt-2">
             Scanned {scanMeta.total_scanned} {activeMarket} in {scanMeta.duration_seconds}s. Try different filters or timeframe.
           </p>
+          {scanMeta.data_limit_notices?.length > 0 && (
+            <div className="mt-4 inline-flex items-center gap-2 rounded-lg border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-sm text-amber-300">
+              <AlertCircle size={16} />
+              <span>{scanMeta.data_limit_notices[0]}</span>
+            </div>
+          )}
         </div>
       );
     }
@@ -81,6 +87,13 @@ export default function ScanResults() {
         <div className="m-4 flex items-center gap-2 rounded-lg border border-scanner-danger/30 bg-scanner-danger/10 px-3 py-2 text-sm text-scanner-danger">
           <AlertCircle size={16} />
           <span>{watchlistError}</span>
+        </div>
+      )}
+
+      {scanMeta?.data_limit_notices?.length > 0 && (
+        <div className="m-4 flex items-center gap-2 rounded-lg border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-sm text-amber-300">
+          <AlertCircle size={16} />
+          <span>{scanMeta.data_limit_notices[0]}</span>
         </div>
       )}
 

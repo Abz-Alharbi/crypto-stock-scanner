@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from backend.clients.polygon import polygon
 from backend.errors import ApiError
 from backend.extensions import db
-from backend.market_config import INTRADAY_TIMEFRAMES, TIMEFRAME_CONFIG, public_timeframes
+from backend.market_config import TIMEFRAME_CONFIG, data_limit_notice, public_timeframes
 from backend.models.scan import ScanHistory, ScanResult
 from backend.services.cache import cache_get, cache_set
 from backend.services.technical import TechnicalAnalysis
@@ -46,7 +46,6 @@ ALL_STOCK_SYMBOLS = NASDAQ_SYMBOLS + NYSE_SYMBOLS
 # TIMEFRAME MAPPING
 # ============================================================
 TIMEFRAME_MAP = TIMEFRAME_CONFIG
-INTRADAY_KEYS = INTRADAY_TIMEFRAMES
 
 
 def _scan_debug_enabled():
@@ -62,13 +61,34 @@ def _debug_scan_log(message, **payload):
         logger.info(message, extra=payload)
 
 
-def get_bars(symbol, timeframe='1D'):
+def _stock_scan_symbols():
+    from backend.services.universe import get_scan_universe_symbols
+
+    return get_scan_universe_symbols(ALL_STOCK_SYMBOLS)
+
+
+def get_bars_with_meta(symbol, timeframe='1D'):
     """Fetch OHLCV bars for a symbol based on timeframe"""
     canonical = canonicalize_symbol(symbol)
-    tf = TIMEFRAME_MAP.get(timeframe, TIMEFRAME_MAP['1D'])
+    tf = TIMEFRAME_MAP.get(timeframe)
+    if not tf:
+        raise ApiError("Invalid timeframe", 400, "validation_error", {"timeframe": timeframe})
     from_date = (datetime.now() - timedelta(days=tf['days'])).strftime('%Y-%m-%d')
     to_date = datetime.now().strftime('%Y-%m-%d')
-    return polygon.get_aggregates(canonical.provider_symbol, tf['timespan'], tf['multiplier'], from_date, to_date)
+    bars = polygon.get_aggregates(canonical.provider_symbol, tf['timespan'], tf['multiplier'], from_date, to_date)
+    bar_count = len(bars or [])
+    return bars, {
+        "timeframe": timeframe,
+        "from_date": from_date,
+        "to_date": to_date,
+        "bar_count": bar_count,
+        "data_limit_notice": data_limit_notice(timeframe, bar_count),
+    }
+
+
+def get_bars(symbol, timeframe='1D'):
+    bars, _meta = get_bars_with_meta(symbol, timeframe)
+    return bars
 
 
 def _symbol_fields(symbol, market=None):
@@ -253,20 +273,12 @@ def search_tickers(query, market):
 
 def stock_detail(symbol, timeframe):
     canonical = canonicalize_symbol(symbol)
-    if timeframe in INTRADAY_KEYS:
-        raise ApiError(
-            f"Intraday timeframes ({timeframe}) require a Polygon.io paid plan. Please use 1D, 1W, 1M, or 1Y.",
-            400,
-            "paid_plan_required",
-            {"upgrade_hint": True},
-        )
-
     cache_key = f"detail:{canonical.provider_symbol}:{timeframe}"
     cached = cache_get(cache_key)
     if cached:
         return cached
 
-    bars = get_bars(canonical.provider_symbol, timeframe)
+    bars, bars_meta = get_bars_with_meta(canonical.provider_symbol, timeframe)
     if not bars:
         raise ApiError(f"No data available for {canonical.display_symbol}", 404, "not_found")
 
@@ -279,6 +291,7 @@ def stock_detail(symbol, timeframe):
         **_symbol_fields(canonical.provider_symbol, details.get("market") if details else canonical.market),
         "name": details.get("name", canonical.display_symbol) if details else canonical.display_symbol,
         "timeframe": timeframe,
+        "data_limit_notice": bars_meta.get("data_limit_notice"),
         "analysis": analysis,
         "trade_setup": analysis.get("trade_setup"),
         "chart_data": [
@@ -292,13 +305,14 @@ def stock_detail(symbol, timeframe):
 
 def chart_data(symbol, timeframe):
     canonical = canonicalize_symbol(symbol)
-    bars = get_bars(canonical.provider_symbol, timeframe)
+    bars, bars_meta = get_bars_with_meta(canonical.provider_symbol, timeframe)
     if not bars:
         raise ApiError(f"No chart data for {canonical.display_symbol}", 404, "not_found")
 
     return {
         **_symbol_fields(canonical.provider_symbol, canonical.market),
         "timeframe": timeframe,
+        "data_limit_notice": bars_meta.get("data_limit_notice"),
         "data": [
             {"t": b["t"], "o": b["o"], "h": b["h"], "l": b["l"], "c": b["c"], "v": b.get("v", 0)}
             for b in bars
@@ -312,13 +326,6 @@ def _emit_scan_progress(progress_callback, **payload):
 
 
 def scan_market(market, selected_filters, timeframe, max_results, user_id=None, job_id=None, progress_callback=None):
-    if timeframe in INTRADAY_KEYS:
-        raise ApiError(
-            f"Intraday timeframes ({timeframe}) require a Polygon.io paid plan. Please use 1D, 1W, 1M, or 1Y.",
-            400,
-            "paid_plan_required",
-            {"upgrade_hint": True},
-        )
     if not polygon.api_key:
         raise ApiError(
             "Polygon API key is not configured. Set POLYGON_API_KEY in Railway backend and worker variables.",
@@ -326,7 +333,7 @@ def scan_market(market, selected_filters, timeframe, max_results, user_id=None, 
             "provider_not_configured",
         )
 
-    symbols = CRYPTO_SYMBOLS if market == "crypto" else ALL_STOCK_SYMBOLS
+    symbols = CRYPTO_SYMBOLS if market == "crypto" else _stock_scan_symbols()
     flat_filters = get_flat_filters()
     valid_filters = [item for item in selected_filters if item in flat_filters]
     if not valid_filters:
@@ -349,6 +356,7 @@ def scan_market(market, selected_filters, timeframe, max_results, user_id=None, 
     filter_errors = []
     symbol_failures = []
     bar_counts = []
+    data_limit_notices = set()
     total_symbols = len(symbols)
     pattern_filter_keys = [
         key for key in valid_filters
@@ -386,7 +394,9 @@ def scan_market(market, selected_filters, timeframe, max_results, user_id=None, 
 
         try:
             attempted += 1
-            bars = get_bars(symbol, timeframe)
+            bars, bars_meta = get_bars_with_meta(symbol, timeframe)
+            if bars_meta.get("data_limit_notice"):
+                data_limit_notices.add(bars_meta["data_limit_notice"])
             bar_count = len(bars or [])
             if bars:
                 bars_fetched += 1
@@ -552,6 +562,7 @@ def scan_market(market, selected_filters, timeframe, max_results, user_id=None, 
         "insufficient_data": insufficient_data,
         "analysis_failures": analysis_failures,
         "bar_counts": bar_count_summary,
+        "data_limit_notices": sorted(data_limit_notices),
         "filter_errors": filter_errors,
         "symbol_failures": symbol_failures,
     }
@@ -661,6 +672,7 @@ def scan_market(market, selected_filters, timeframe, max_results, user_id=None, 
             "pattern_detected_symbols": pattern_detected_symbols,
             "pattern_matched_symbols": pattern_matched_symbols,
             "bar_counts": bar_count_summary,
+            "data_limit_notices": sorted(data_limit_notices),
             "filter_errors": filter_errors,
             "symbol_failures": symbol_failures,
             "duration_seconds": round(duration, 2),

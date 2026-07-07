@@ -86,7 +86,7 @@ export default function StockDetailModal() {
           <div className="px-5 py-3 border-b border-scanner-border space-y-2">
             {/* Row 1: Minutes */}
             <div className="flex items-center gap-1.5">
-              <span className="text-[9px] text-scanner-text-dim uppercase tracking-widest w-10 shrink-0">Min</span>
+              <span className="text-[9px] text-scanner-text-dim uppercase tracking-widest w-14 shrink-0">Subday</span>
               {intradayTimeframes.map(tf => (
                 <button
                   key={tf.key}
@@ -107,7 +107,7 @@ export default function StockDetailModal() {
             </div>
             {/* Row 2: Hour+ */}
             <div className="flex items-center gap-1.5">
-              <span className="text-[9px] text-scanner-text-dim uppercase tracking-widest w-10 shrink-0">Time</span>
+              <span className="text-[9px] text-scanner-text-dim uppercase tracking-widest w-14 shrink-0">Higher</span>
               {higherTimeframes.map(tf => (
                 <button
                   key={tf.key}
@@ -132,6 +132,13 @@ export default function StockDetailModal() {
             <div className="mx-5 mt-4 flex items-center gap-2 rounded-lg border border-scanner-danger/30 bg-scanner-danger/10 px-3 py-2 text-sm text-scanner-danger">
               <AlertCircle size={16} />
               <span>{detailError || watchlistError}</span>
+            </div>
+          )}
+
+          {stockDetail?.data_limit_notice && !detailError && (
+            <div className="mx-5 mt-4 flex items-center gap-2 rounded-lg border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-sm text-amber-300">
+              <AlertCircle size={16} />
+              <span>{stockDetail.data_limit_notice}</span>
             </div>
           )}
 

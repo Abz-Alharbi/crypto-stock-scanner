@@ -9,6 +9,7 @@ from backend.schemas.market import ChartQuery, ScanRequest, ScanTemplateCreateRe
 from backend.services import scan_jobs
 from backend.services import scan_templates
 from backend.services import scans as scan_service
+from backend.services.universe import universe_builder
 
 scan_bp = Blueprint("scan_api", __name__, url_prefix="/api")
 
@@ -21,6 +22,11 @@ def health():
 @scan_bp.route("/filters", methods=["GET"])
 def filters():
     return jsonify(scan_service.filters_payload())
+
+
+@scan_bp.route("/universe/status", methods=["GET"])
+def universe_status():
+    return jsonify(universe_builder.status_payload())
 
 
 @scan_bp.route("/search", methods=["GET"])

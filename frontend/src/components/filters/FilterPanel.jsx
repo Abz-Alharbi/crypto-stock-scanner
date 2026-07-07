@@ -71,13 +71,13 @@ export default function FilterPanel() {
       {/* Timeframe Selector */}
       <div className="px-4 py-3 border-b border-scanner-border">
         <label className="block text-[10px] font-medium text-scanner-text-dim uppercase tracking-widest mb-2">Timeframe</label>
-        <div className="flex gap-1">
+        <div className="grid grid-cols-6 gap-1">
           {timeframeOptions.map(tf => (
             <button
               key={tf.key}
               onClick={() => tf.available && setTimeframe(tf.key)}
               disabled={!tf.available}
-              className={`flex-1 py-1.5 rounded-md text-xs font-semibold transition-all ${
+              className={`py-1.5 rounded-md text-xs font-semibold transition-all ${
                 timeframe === tf.key
                   ? 'bg-scanner-accent text-scanner-bg shadow shadow-scanner-accent/30'
                   : !tf.available
@@ -223,7 +223,7 @@ export default function FilterPanel() {
           )}
         </button>
         <p className="text-center text-[10px] text-scanner-text-dim mt-2">
-          Free tier: ~12s per stock (5 API calls/min)
+          Uses the current backend scan universe and Polygon plan limits
         </p>
       </div>
     </div>

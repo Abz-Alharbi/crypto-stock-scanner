@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import random
+import threading
 import time
 from datetime import datetime, timedelta
 from urllib.parse import urlencode
@@ -9,7 +10,6 @@ from urllib.parse import urlencode
 import requests
 
 from backend.services.cache import cache_get, cache_set
-from backend.services.rate_limit import wait_for_rate_limit
 
 logger = logging.getLogger(__name__)
 
@@ -20,8 +20,7 @@ BACKOFF_BASE_SECONDS = 1
 BACKOFF_JITTER_SECONDS = 0.5
 CIRCUIT_BREAKER_FAILURE_THRESHOLD = 5
 CIRCUIT_BREAKER_PAUSE_SECONDS = 60
-RATE_LIMIT_MAX_CALLS = 5
-RATE_LIMIT_WINDOW_SECONDS = 60
+POLYGON_MAX_CONCURRENT_REQUESTS = int(os.getenv("POLYGON_MAX_CONCURRENT_REQUESTS", "10"))
 SNAPSHOT_PREFILTER_ENABLED = os.getenv("POLYGON_SNAPSHOT_PREFILTER", "false").lower() == "true"
 
 
@@ -37,6 +36,8 @@ class PolygonClient:
         self.circuit_open_until = 0
         self._snapshot_indexes = {}
         self.last_error = None
+        self.max_concurrent_requests = max(1, POLYGON_MAX_CONCURRENT_REQUESTS)
+        self._request_semaphore = threading.BoundedSemaphore(self.max_concurrent_requests)
 
     def _debug_enabled(self):
         return os.getenv("POLYGON_DEBUG", "false").lower() == "true"
@@ -68,9 +69,6 @@ class PolygonClient:
             "endpoint": endpoint,
         }
 
-    def _rate_limit(self):
-        wait_for_rate_limit("polygon", RATE_LIMIT_MAX_CALLS, RATE_LIMIT_WINDOW_SECONDS)
-
     def _is_circuit_open(self):
         return time.time() < self.circuit_open_until
 
@@ -92,6 +90,11 @@ class PolygonClient:
         jitter = random.uniform(0, BACKOFF_JITTER_SECONDS)
         return min(CIRCUIT_BREAKER_PAUSE_SECONDS, backoff + jitter)
 
+    def _request_url(self, endpoint):
+        if str(endpoint).startswith("http://") or str(endpoint).startswith("https://"):
+            return endpoint
+        return f"{self.base_url}{endpoint}"
+
     def _request(self, endpoint, params=None):
         if not self.api_key:
             self._set_error("missing_api_key", "POLYGON_API_KEY is not configured", endpoint=endpoint)
@@ -109,7 +112,7 @@ class PolygonClient:
             logger.warning("Polygon circuit breaker is open; skipping request to %s", endpoint)
             return None
 
-        url = f"{self.base_url}{endpoint}"
+        url = self._request_url(endpoint)
         if self._debug_enabled():
             logger.info(
                 "polygon_request",
@@ -120,9 +123,9 @@ class PolygonClient:
                 },
             )
         for attempt in range(MAX_RETRIES + 1):
-            self._rate_limit()
             try:
-                resp = self.session.get(url, params=params or {}, timeout=REQUEST_TIMEOUT_SECONDS)
+                with self._request_semaphore:
+                    resp = self.session.get(url, params=params or {}, timeout=REQUEST_TIMEOUT_SECONDS)
             except (requests.Timeout, requests.ConnectionError) as exc:
                 self._set_error("network_error", str(exc), endpoint=endpoint)
                 if self._record_failure():
@@ -150,16 +153,17 @@ class PolygonClient:
 
             if resp.status_code == 429 and attempt < MAX_RETRIES:
                 self._set_error("rate_limited", resp.text[:300], status_code=resp.status_code, endpoint=endpoint)
-                if self._record_failure():
-                    return None
-                wait_for_rate_limit("polygon_429", 1, 60)
-                delay = self._retry_delay(attempt + 1)
+                retry_after = getattr(resp, "headers", {}).get("Retry-After")
+                try:
+                    delay = float(retry_after) if retry_after else self._retry_delay(attempt + 1)
+                except (TypeError, ValueError):
+                    delay = self._retry_delay(attempt + 1)
                 logger.warning("Polygon rate limited. Retrying in %.2fs", delay)
                 time.sleep(delay)
                 continue
 
             self._set_error("http_error", resp.text[:300], status_code=resp.status_code, endpoint=endpoint)
-            if self._record_failure():
+            if resp.status_code >= 500 and self._record_failure():
                 return None
             logger.error("Polygon API error %s: %s", resp.status_code, resp.text[:200])
             return None
@@ -246,6 +250,35 @@ class PolygonClient:
         data = self._request("/v2/snapshot/locale/us/markets/stocks/tickers")
         if data and data.get("tickers"):
             return data["tickers"]
+        return []
+
+    def get_reference_tickers(self, exchange, limit=1000):
+        """Fetch all active common stock tickers for a primary exchange."""
+        tickers = []
+        next_url = "/v3/reference/tickers"
+        params = {
+            "market": "stocks",
+            "type": "CS",
+            "exchange": exchange,
+            "active": "true",
+            "limit": limit,
+        }
+
+        while next_url:
+            data = self._request(next_url, params)
+            if not data:
+                break
+            tickers.extend(data.get("results") or [])
+            next_url = data.get("next_url")
+            params = None
+        return tickers
+
+    def get_grouped_daily_stocks(self, date):
+        """Fetch grouped US stock aggregates for one trading date."""
+        endpoint = f"/v2/aggs/grouped/locale/us/market/stocks/{date}"
+        data = self._request(endpoint, {"adjusted": "true"})
+        if data and data.get("results"):
+            return data["results"]
         return []
 
     def get_snapshot_crypto(self):

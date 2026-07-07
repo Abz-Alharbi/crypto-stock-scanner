@@ -166,10 +166,21 @@ def _register_cli(app):
             )
         )
 
+    @app.cli.command("rebuild-universe")
+    def rebuild_universe_command():
+        """Rebuild the stock scan universe from Polygon volume data."""
+        import json
+
+        from backend.services.universe import universe_builder
+
+        payload = universe_builder.build_and_save_universe()
+        click.echo(json.dumps(payload, indent=2))
+
 
 def create_app(config=None):
     configure_logging()
     app = Flask(__name__)
+    app.json.sort_keys = False
     if isinstance(config, dict):
         app.config.from_object(get_config(None))
         app.config.update(config)
@@ -214,6 +225,12 @@ def create_app(config=None):
             from backend.services.scan_templates import ensure_template_sweep_scheduled
 
             ensure_template_sweep_scheduled()
+
+    if app.config.get("ENABLE_UNIVERSE_REFRESH_SCHEDULER"):
+        with app.app_context():
+            from backend.services.universe.universe_builder import ensure_universe_rebuild_scheduled
+
+            ensure_universe_rebuild_scheduled()
 
     if app.config.get("AUTO_CREATE_SCHEMA"):
         with app.app_context():
