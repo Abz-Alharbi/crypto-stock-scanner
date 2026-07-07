@@ -122,10 +122,12 @@ def schedule_next_template_sweep(delay_seconds=None):
     if not client.set(SCHEDULE_MARKER_KEY, "1", ex=marker_ttl, nx=True):
         return False
 
+    from backend.jobs.template_jobs import evaluate_scan_templates_job
+
     queue = get_scan_queue()
     queue.enqueue_in(
         timedelta(seconds=delay),
-        "backend.jobs.template_jobs.evaluate_scan_templates_job",
+        evaluate_scan_templates_job,
         job_id=f"scan-template-sweep-{int(time.time())}",
         job_timeout=SCAN_JOB_TIMEOUT_SECONDS,
         result_ttl=template_interval_seconds(),
