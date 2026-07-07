@@ -3,7 +3,7 @@ __pycache__/
 node_modules/
 *.pyc
 logs/
-models/
+/models/
 model.pt
 .venv/
 venv/
