@@ -18,4 +18,6 @@ psycopg2-binary==2.9.10
 redis==5.1.1
 rq==2.10.0
 ultralytics==8.3.94
+# Satisfy Ultralytics' opencv-python dependency while using the headless cv2 wheel.
+./backend/vendor/opencv_python_stub/opencv_python-4.11.0.86-py3-none-any.whl
 opencv-python-headless==4.11.0.86
