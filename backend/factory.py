@@ -142,6 +142,30 @@ def _register_cli(app):
         payload = polygon.debug_aggregates_raw(symbol.upper(), str(from_date), str(to_date))
         click.echo(json.dumps(payload, indent=2))
 
+    @app.cli.command("debug-scan")
+    @click.option("--market", default="stocks", show_default=True, help="Market to scan.")
+    @click.option("--timeframe", default="1D", show_default=True, help="Timeframe to scan.")
+    @click.option("--filters", required=True, help="Comma-separated filter keys, e.g. bullish_pattern.")
+    @click.option("--limit", default=30, show_default=True, help="Maximum result count.")
+    def debug_scan_command(market, timeframe, filters, limit):
+        """Run a scan synchronously and print scan counters."""
+        import json
+
+        from backend.services import scans
+
+        filter_keys = [item.strip() for item in filters.split(",") if item.strip()]
+        payload = scans.scan_market(market, filter_keys, timeframe, int(limit), job_id="debug-scan")
+        click.echo(
+            json.dumps(
+                {
+                    "meta": payload.get("meta"),
+                    "result_count": len(payload.get("results") or []),
+                    "results": (payload.get("results") or [])[:5],
+                },
+                indent=2,
+            )
+        )
+
 
 def create_app(config=None):
     configure_logging()

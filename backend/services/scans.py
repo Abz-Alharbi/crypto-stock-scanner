@@ -340,8 +340,21 @@ def scan_market(market, selected_filters, timeframe, max_results, user_id=None, 
     no_data = 0
     insufficient_data = 0
     analysis_failures = 0
+    bars_fetched = 0
+    bars_usable = 0
+    pattern_computation_attempted = 0
+    pattern_computation_errors = 0
+    pattern_detected_symbols = 0
+    pattern_matched_symbols = 0
+    filter_errors = []
     symbol_failures = []
+    bar_counts = []
     total_symbols = len(symbols)
+    pattern_filter_keys = [
+        key for key in valid_filters
+        if flat_filters[key].get("category") == "patterns"
+    ]
+    pattern_scan_requested = bool(pattern_filter_keys)
 
     logger.info(
         "scan_started",
@@ -374,42 +387,61 @@ def scan_market(market, selected_filters, timeframe, max_results, user_id=None, 
         try:
             attempted += 1
             bars = get_bars(symbol, timeframe)
+            bar_count = len(bars or [])
+            if bars:
+                bars_fetched += 1
+                bar_counts.append(bar_count)
             if not bars or len(bars) < 30:
                 if not bars:
                     no_data += 1
                 else:
                     insufficient_data += 1
-                _debug_scan_log(
+                logger.warning(
                     "scan_symbol_data_rejected",
-                    job_id=job_id,
-                    symbol=symbol,
-                    bars=len(bars or []),
-                    reason="no_data" if not bars else "insufficient_data",
-                    provider_error=getattr(polygon, "last_error", None),
+                    extra={
+                        "job_id": job_id,
+                        "symbol": symbol,
+                        "bars": bar_count,
+                        "reason": "no_data" if not bars else "insufficient_data",
+                        "provider_error": getattr(polygon, "last_error", None),
+                    },
                 )
                 errors += 1
                 continue
 
+            bars_usable += 1
             analysis = ta.full_analysis(bars)
             if not analysis:
                 analysis_failures += 1
-                _debug_scan_log(
+                logger.warning(
                     "scan_symbol_analysis_empty",
-                    job_id=job_id,
-                    symbol=symbol,
-                    bars=len(bars),
+                    extra={"job_id": job_id, "symbol": symbol, "bars": bar_count},
                 )
                 errors += 1
                 continue
 
             scanned += 1
+            if pattern_scan_requested:
+                pattern_computation_attempted += 1
+                patterns = analysis.get("patterns") or {}
+                candle_patterns = patterns.get("candlestick") or []
+                chart_patterns = patterns.get("chart") or []
+                if candle_patterns or chart_patterns:
+                    pattern_detected_symbols += 1
             matched_filters = []
             for filter_key in valid_filters:
                 try:
                     if flat_filters[filter_key]["check"](analysis):
                         matched_filters.append(filter_key)
-                except Exception:
-                    pass
+                except (KeyError, TypeError, ValueError) as exc:
+                    if flat_filters[filter_key].get("category") == "patterns":
+                        pattern_computation_errors += 1
+                    filter_error = {"symbol": symbol, "filter": filter_key, "error": str(exc)}
+                    filter_errors.append(filter_error)
+                    logger.exception(
+                        "scan_filter_check_failed",
+                        extra={"job_id": job_id, **filter_error},
+                    )
 
             if _scan_debug_enabled() and scanned <= _scan_debug_sample_limit():
                 _debug_scan_log(
@@ -424,6 +456,8 @@ def scan_market(market, selected_filters, timeframe, max_results, user_id=None, 
                 )
 
             if matched_filters:
+                if pattern_scan_requested and any(key in pattern_filter_keys for key in matched_filters):
+                    pattern_matched_symbols += 1
                 canonical = canonicalize_symbol(symbol, market)
                 trade = analysis.get("trade_setup") or {}
                 results.append(
@@ -467,11 +501,16 @@ def scan_market(market, selected_filters, timeframe, max_results, user_id=None, 
                         signal=analysis["overall_signal"],
                     )
                     db.session.add(scan)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.exception(
+                        "scan_result_persist_failed",
+                        extra={"job_id": job_id, "symbol": canonical.provider_symbol, "error": str(exc)},
+                    )
 
         except Exception as exc:
             analysis_failures += 1
+            if pattern_scan_requested:
+                pattern_computation_errors += 1
             if len(symbol_failures) < 5:
                 symbol_failures.append({"symbol": symbol, "error": str(exc)})
             logger.exception("scan_symbol_failed", extra={"job_id": job_id, "symbol": symbol})
@@ -488,6 +527,35 @@ def scan_market(market, selected_filters, timeframe, max_results, user_id=None, 
         )
 
     duration = time.time() - start_time
+    bar_count_summary = {
+        "min": min(bar_counts) if bar_counts else 0,
+        "max": max(bar_counts) if bar_counts else 0,
+        "avg": round(sum(bar_counts) / len(bar_counts), 1) if bar_counts else 0,
+    }
+    scan_counter_payload = {
+        "job_id": job_id,
+        "market": market,
+        "timeframe": timeframe,
+        "total_symbols": total_symbols,
+        "attempted": attempted,
+        "bars_fetched": bars_fetched,
+        "bars_usable": bars_usable,
+        "pattern_scan_requested": pattern_scan_requested,
+        "pattern_filter_keys": pattern_filter_keys,
+        "pattern_computation_attempted": pattern_computation_attempted,
+        "pattern_computation_errors": pattern_computation_errors,
+        "pattern_detected_symbols": pattern_detected_symbols,
+        "pattern_matched_symbols": pattern_matched_symbols,
+        "matches": len(results),
+        "errors": errors,
+        "no_data": no_data,
+        "insufficient_data": insufficient_data,
+        "analysis_failures": analysis_failures,
+        "bar_counts": bar_count_summary,
+        "filter_errors": filter_errors,
+        "symbol_failures": symbol_failures,
+    }
+    logger.info("scan_completed_counters", extra=scan_counter_payload)
 
     if scanned == 0:
         provider_error = getattr(polygon, "last_error", None)
@@ -506,6 +574,8 @@ def scan_market(market, selected_filters, timeframe, max_results, user_id=None, 
                 "errors": errors,
                 "provider_error": provider_error,
                 "symbol_failures": symbol_failures,
+                "filter_errors": filter_errors,
+                "scan_counters": scan_counter_payload,
             },
         )
         if not provider_only_failure:
@@ -522,6 +592,8 @@ def scan_market(market, selected_filters, timeframe, max_results, user_id=None, 
                     "insufficient_data": insufficient_data,
                     "analysis_failures": analysis_failures,
                     "symbol_failures": symbol_failures,
+                    "filter_errors": filter_errors,
+                    "scan_counters": scan_counter_payload,
                 },
             )
         raise ApiError(
@@ -538,6 +610,8 @@ def scan_market(market, selected_filters, timeframe, max_results, user_id=None, 
                 "analysis_failures": analysis_failures,
                 "provider_error": provider_error,
                 "symbol_failures": symbol_failures,
+                "filter_errors": filter_errors,
+                "scan_counters": scan_counter_payload,
             },
         )
 
@@ -576,9 +650,18 @@ def scan_market(market, selected_filters, timeframe, max_results, user_id=None, 
             "total_symbols": total_symbols,
             "total_matched": len(results),
             "errors": errors,
+            "bars_fetched": bars_fetched,
+            "bars_usable": bars_usable,
             "no_data": no_data,
             "insufficient_data": insufficient_data,
             "analysis_failures": analysis_failures,
+            "pattern_scan_requested": pattern_scan_requested,
+            "pattern_computation_attempted": pattern_computation_attempted,
+            "pattern_computation_errors": pattern_computation_errors,
+            "pattern_detected_symbols": pattern_detected_symbols,
+            "pattern_matched_symbols": pattern_matched_symbols,
+            "bar_counts": bar_count_summary,
+            "filter_errors": filter_errors,
             "symbol_failures": symbol_failures,
             "duration_seconds": round(duration, 2),
             "filters_applied": valid_filters,

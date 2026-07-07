@@ -76,6 +76,11 @@ def test_bulk_bullish_pattern_scan_uses_ohlcv_and_never_yolov8(monkeypatch, app)
         payload = scans.scan_market("stocks", ["bullish_pattern"], "1D", 10)
 
     assert payload["meta"]["total_scanned"] == 1
+    assert payload["meta"]["bars_fetched"] == 1
+    assert payload["meta"]["bars_usable"] == 1
+    assert payload["meta"]["pattern_computation_attempted"] == 1
+    assert payload["meta"]["pattern_detected_symbols"] == 1
+    assert payload["meta"]["pattern_matched_symbols"] == 1
     assert payload["results"][0]["provider_symbol"] == "AAPL"
     assert payload["results"][0]["matched_filters"] == ["bullish_pattern"]
     assert "Bullish Engulfing" in payload["results"][0]["patterns"]
@@ -91,6 +96,10 @@ def test_bulk_pattern_scan_can_complete_with_zero_matches(monkeypatch, app):
     assert payload["results"] == []
     assert payload["meta"]["total_scanned"] == 1
     assert payload["meta"]["total_matched"] == 0
+    assert payload["meta"]["bars_fetched"] == 1
+    assert payload["meta"]["bars_usable"] == 1
+    assert payload["meta"]["pattern_computation_attempted"] == 1
+    assert payload["meta"]["pattern_computation_errors"] == 0
 
 
 def test_scan_market_reports_analysis_failure_separately(monkeypatch):
