@@ -11,6 +11,7 @@ logger = logging.getLogger(__name__)
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 _client = None
+_rq_client = None
 _disabled_until = 0
 
 
@@ -37,6 +38,33 @@ def get_redis_client():
     except RedisError as exc:
         _disabled_until = time.time() + 30
         logger.warning("Redis unavailable: %s", exc)
+        return None
+
+
+def get_rq_redis_client():
+    """Return a binary Redis client for RQ's pickled job payloads."""
+    global _rq_client, _disabled_until
+
+    if not REDIS_URL:
+        return None
+    if _disabled_until > time.time():
+        return None
+    if _rq_client is not None:
+        return _rq_client
+
+    try:
+        client = redis.Redis.from_url(
+            REDIS_URL,
+            decode_responses=False,
+            socket_connect_timeout=2,
+            socket_timeout=2,
+        )
+        client.ping()
+        _rq_client = client
+        return _rq_client
+    except RedisError as exc:
+        _disabled_until = time.time() + 30
+        logger.warning("Redis unavailable for RQ: %s", exc)
         return None
 
 

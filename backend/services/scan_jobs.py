@@ -9,7 +9,7 @@ from rq.exceptions import NoSuchJobError
 
 from backend.errors import ApiError
 from backend.services.redis_store import (
-    get_redis_client,
+    get_rq_redis_client,
     redis_exists,
     redis_get_json,
     redis_set_json,
@@ -42,7 +42,7 @@ def _state_age_seconds(state):
 
 
 def get_scan_queue():
-    client = get_redis_client()
+    client = get_rq_redis_client()
     if client is None:
         raise ApiError("Redis is unavailable", 503, "redis_unavailable")
     return Queue(SCAN_QUEUE_NAME, connection=client)
@@ -62,7 +62,7 @@ def get_scan_job_state(job_id):
     if not state or state.get("status") in {"completed", "failed", "canceled"}:
         return state
 
-    client = get_redis_client()
+    client = get_rq_redis_client()
     if client is None:
         return state
 
@@ -161,8 +161,10 @@ def request_scan_cancel(job_id, user):
 
     redis_set_value(_cancel_key(job_id), "1", ttl=SCAN_JOB_TTL_SECONDS)
     try:
-        job = Job.fetch(job_id, connection=get_redis_client())
-        job.cancel()
+        client = get_rq_redis_client()
+        if client is not None:
+            job = Job.fetch(job_id, connection=client)
+            job.cancel()
     except (NoSuchJobError, AttributeError):
         pass
 
