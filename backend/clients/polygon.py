@@ -22,6 +22,7 @@ CIRCUIT_BREAKER_FAILURE_THRESHOLD = 5
 CIRCUIT_BREAKER_PAUSE_SECONDS = 60
 RATE_LIMIT_MAX_CALLS = 5
 RATE_LIMIT_WINDOW_SECONDS = 60
+SNAPSHOT_PREFILTER_ENABLED = os.getenv("POLYGON_SNAPSHOT_PREFILTER", "false").lower() == "true"
 
 
 class PolygonClient:
@@ -207,7 +208,7 @@ class PolygonClient:
         if not to_date:
             to_date = datetime.now().strftime("%Y-%m-%d")
 
-        if not self._snapshot_allows_ohlcv_fetch(ticker):
+        if SNAPSHOT_PREFILTER_ENABLED and not self._snapshot_allows_ohlcv_fetch(ticker):
             return []
 
         endpoint = f"/v2/aggs/ticker/{ticker}/range/{multiplier}/{timespan}/{from_date}/{to_date}"

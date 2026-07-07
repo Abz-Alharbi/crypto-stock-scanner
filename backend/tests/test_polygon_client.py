@@ -3,6 +3,7 @@ from unittest.mock import patch
 
 import requests
 
+from backend.clients import polygon as polygon_module
 from backend.clients.polygon import PolygonClient, REQUEST_TIMEOUT_SECONDS
 
 
@@ -44,6 +45,7 @@ class PolygonClientTests(unittest.TestCase):
         self.jitter.start()
 
     def tearDown(self):
+        polygon_module.SNAPSHOT_PREFILTER_ENABLED = False
         patch.stopall()
 
     def test_429_retries_iteratively_with_backoff_and_timeout(self):
@@ -89,6 +91,7 @@ class PolygonClientTests(unittest.TestCase):
         self.assertTrue(all(call["timeout"] == REQUEST_TIMEOUT_SECONDS for call in client.session.calls))
 
     def test_snapshot_preflight_falls_back_when_ticker_missing(self):
+        polygon_module.SNAPSHOT_PREFILTER_ENABLED = True
         client = PolygonClient("test-key")
         client._snapshot_indexes["stocks"] = {"MSFT": {"ticker": "MSFT", "day": {"v": 100}}}
 
@@ -105,6 +108,18 @@ class PolygonClientTests(unittest.TestCase):
 
         self.assertIsNone(result)
         self.assertEqual(client.last_error["type"], "missing_api_key")
+
+    def test_aggregates_skip_snapshot_prefilter_by_default(self):
+        polygon_module.SNAPSHOT_PREFILTER_ENABLED = False
+        client = PolygonClient("test-key")
+
+        with patch.object(client, "_snapshot_allows_ohlcv_fetch") as snapshot, patch.object(
+            client, "_request", return_value={"results": [{"c": 10}]}
+        ):
+            result = client.get_aggregates("AAPL")
+
+        self.assertEqual(result, [{"c": 10}])
+        snapshot.assert_not_called()
 
 
 if __name__ == "__main__":
