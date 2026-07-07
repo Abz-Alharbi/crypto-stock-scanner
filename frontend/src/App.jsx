@@ -10,7 +10,7 @@ import WatchlistPage from './components/stock/WatchlistPage';
 import AuthModal from './components/auth/AuthModal';
 import RouteErrorBoundary from './components/common/RouteErrorBoundary';
 import useMarketStore from './store/useMarketStore';
-import useAuthStore from './store/useAuthStore';
+import useAuthStore, { AUTH_DISABLED } from './store/useAuthStore';
 import useThemeStore from './store/useThemeStore';
 
 const AdminPanel = lazy(() => import('./components/admin/AdminPanel'));
@@ -23,11 +23,16 @@ function AuthRequired({ children, adminOnly = false }) {
   const { isAuthenticated, user, setAuthModal } = useAuthStore();
 
   useEffect(() => {
+    // # RE-ENABLE AUTH: remove this block
+    if (AUTH_DISABLED) return;
     if (!isAuthenticated) {
       sessionStorage.setItem('pending_auth_path', `${location.pathname}${location.search}`);
       setAuthModal(true, 'login');
     }
   }, [isAuthenticated, location.pathname, location.search, setAuthModal]);
+
+  // # RE-ENABLE AUTH: remove this block
+  if (AUTH_DISABLED) return children;
 
   if (!isAuthenticated) return <Navigate to="/" replace />;
 

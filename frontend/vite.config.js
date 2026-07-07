@@ -3,7 +3,6 @@ import react from '@vitejs/plugin-react'
 
 const previewAllowedHosts = [
   'scannerfrontend-production.up.railway.app',
-  process.env.RAILWAY_PUBLIC_DOMAIN,
 ].filter(Boolean)
 
 export default defineConfig({

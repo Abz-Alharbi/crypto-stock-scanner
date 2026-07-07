@@ -1,8 +1,11 @@
+import os
 import secrets
 from datetime import datetime, timedelta
 from functools import wraps
 
-from flask import request
+from flask import current_app, has_app_context, request
+from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 
 from backend.errors import ApiError, error_response
 from backend.extensions import db
@@ -17,6 +20,29 @@ from backend.services.redis_store import (
 )
 
 TOKEN_TTL_SECONDS = 7 * 24 * 60 * 60
+MOCK_AUTH_USER_PAYLOAD = {
+    "id": 1,
+    "username": "test",
+    "email": "test@test.com",
+    "role": "admin",
+    "plan": "pro",
+    "is_active": True,
+}
+
+
+class MockAuthUser:
+    id = MOCK_AUTH_USER_PAYLOAD["id"]
+    username = MOCK_AUTH_USER_PAYLOAD["username"]
+    email = MOCK_AUTH_USER_PAYLOAD["email"]
+    role = MOCK_AUTH_USER_PAYLOAD["role"]
+    plan = MOCK_AUTH_USER_PAYLOAD["plan"]
+    is_active = MOCK_AUTH_USER_PAYLOAD["is_active"]
+
+    def to_dict(self):
+        return dict(MOCK_AUTH_USER_PAYLOAD)
+
+
+MOCK_AUTH_USER = MockAuthUser()
 
 
 def _token_key(token):
@@ -25,6 +51,38 @@ def _token_key(token):
 
 def _blocklist_key(token):
     return f"auth:blocklist:{token}"
+
+
+def auth_disabled():
+    if has_app_context():
+        return bool(current_app.config.get("AUTH_DISABLED", False))
+    return os.getenv("AUTH_DISABLED", "false").lower() == "true"
+
+
+def _ensure_auth_disabled_db_user():
+    try:
+        existing = db.session.get(User, MOCK_AUTH_USER.id)
+        if existing:
+            return
+
+        user = User(
+            id=MOCK_AUTH_USER.id,
+            username=MOCK_AUTH_USER.username,
+            email=MOCK_AUTH_USER.email,
+            role="admin",
+            plan="premium",
+            is_active=True,
+        )
+        user.set_password(secrets.token_urlsafe(32))
+        db.session.add(user)
+        db.session.flush()
+        if db.engine.dialect.name == "postgresql":
+            db.session.execute(
+                text("SELECT setval(pg_get_serial_sequence('users', 'id'), (SELECT COALESCE(MAX(id), 1) FROM users))")
+            )
+        db.session.commit()
+    except SQLAlchemyError:
+        db.session.rollback()
 
 
 def generate_token(user_id):
@@ -85,6 +143,11 @@ def get_user_for_token(token):
 def token_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
+        # RE-ENABLE AUTH: remove this block
+        if auth_disabled():
+            _ensure_auth_disabled_db_user()
+            return f(MOCK_AUTH_USER, *args, **kwargs)
+
         token = get_bearer_token()
         if not token:
             return error_response("Token is missing", 401, "auth_required")

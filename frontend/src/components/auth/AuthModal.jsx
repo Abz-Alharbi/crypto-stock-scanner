@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { X, Eye, EyeOff, LogIn, UserPlus, AlertCircle } from 'lucide-react';
-import useAuthStore from '../../store/useAuthStore';
+import useAuthStore, { AUTH_DISABLED } from '../../store/useAuthStore';
 
 export default function AuthModal() {
   const { showAuthModal, authMode, setAuthModal, login, register, isLoading, error } = useAuthStore();
@@ -9,6 +9,9 @@ export default function AuthModal() {
   const [form, setForm] = useState({ username: '', email: '', password: '', confirmPassword: '' });
   const [showPassword, setShowPassword] = useState(false);
   const [localError, setLocalError] = useState('');
+
+  // # RE-ENABLE AUTH: remove this block
+  if (AUTH_DISABLED) return null;
 
   if (!showAuthModal) return null;
 

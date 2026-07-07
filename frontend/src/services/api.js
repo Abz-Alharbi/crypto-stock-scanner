@@ -2,6 +2,7 @@ import axios from 'axios'
 
 const API_URL = import.meta.env.VITE_API_URL || ''
 const ACCESS_TOKEN_KEY = 'access_token'
+const AUTH_DISABLED = String(import.meta.env.VITE_AUTH_DISABLED).toLowerCase() === 'true'
 
 let unauthorizedHandler = null
 
@@ -26,6 +27,9 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (response) => response,
   (error) => {
+    // # RE-ENABLE AUTH: remove this block
+    if (AUTH_DISABLED) return Promise.reject(error)
+
     if (error.response?.status === 401) {
       localStorage.removeItem(ACCESS_TOKEN_KEY)
       localStorage.removeItem('auth_user')

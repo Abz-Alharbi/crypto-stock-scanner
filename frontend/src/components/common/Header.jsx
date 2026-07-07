@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Activity, TrendingUp, LogIn, LogOut, Settings, Menu, X, BookmarkPlus, Newspaper, PieChart, Bell } from 'lucide-react';
-import useAuthStore from '../../store/useAuthStore';
+import useAuthStore, { AUTH_DISABLED } from '../../store/useAuthStore';
 import useMarketStore from '../../store/useMarketStore';
 import ThemeToggle from './ThemeToggle';
 
@@ -167,22 +167,30 @@ export default function Header() {
                       <p className="text-sm font-medium truncate">{user?.email}</p>
                       <span className="inline-block mt-1 text-[10px] px-2 py-0.5 rounded-full bg-scanner-accent/10 text-scanner-accent uppercase">{user?.plan} plan</span>
                     </div>
-                    <button
-                      onClick={() => { logout(); setProfileOpen(false); }}
-                      className="w-full flex items-center gap-2 px-4 py-2 text-sm text-scanner-danger hover:bg-scanner-danger/10 transition-colors"
-                    >
-                      <LogOut size={14} /> Sign out
-                    </button>
+                    {/* # RE-ENABLE AUTH: remove this block */}
+                    {!AUTH_DISABLED && (
+                      <button
+                        onClick={() => { logout(); setProfileOpen(false); }}
+                        className="w-full flex items-center gap-2 px-4 py-2 text-sm text-scanner-danger hover:bg-scanner-danger/10 transition-colors"
+                      >
+                        <LogOut size={14} /> Sign out
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
             ) : (
-              <button
-                onClick={() => setAuthModal(true, 'login')}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-scanner-accent text-scanner-bg text-sm font-semibold hover:bg-scanner-accent/90 transition-all shadow-lg shadow-scanner-accent/20"
-              >
-                <LogIn size={14} /> Sign In
-              </button>
+              <>
+                {/* # RE-ENABLE AUTH: remove this block */}
+                {!AUTH_DISABLED && (
+                  <button
+                    onClick={() => setAuthModal(true, 'login')}
+                    className="flex items-center gap-2 px-4 py-2 rounded-lg bg-scanner-accent text-scanner-bg text-sm font-semibold hover:bg-scanner-accent/90 transition-all shadow-lg shadow-scanner-accent/20"
+                  >
+                    <LogIn size={14} /> Sign In
+                  </button>
+                )}
+              </>
             )}
 
             <button

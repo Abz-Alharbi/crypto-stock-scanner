@@ -14,6 +14,7 @@ class BaseConfig:
     ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173")
     DEBUG = False
     TESTING = False
+    AUTH_DISABLED = os.getenv("AUTH_DISABLED", "false").lower() == "true"
     AUTO_CREATE_SCHEMA = os.getenv("AUTO_CREATE_SCHEMA", "false").lower() == "true"
     ENABLE_SCAN_TEMPLATE_SCHEDULER = os.getenv("ENABLE_SCAN_TEMPLATE_SCHEDULER", "false").lower() == "true"
     SCAN_TEMPLATE_EVALUATION_INTERVAL_SECONDS = int(os.getenv("SCAN_TEMPLATE_EVALUATION_INTERVAL_SECONDS", "900"))
