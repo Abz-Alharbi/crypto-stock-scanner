@@ -12,7 +12,7 @@ export const INDICATOR_COLORS = {
   ema20: '#3B82F6',
   ema50: '#EC4899',
   ema200: '#8B5CF6',
-  bollingerBands: '#A78BFA',
+  bollingerBands: '#A3E635',
   macdLine: '#06B6D4',
   macdSignal: '#F97316',
   macdHistogram: '#94A3B8',

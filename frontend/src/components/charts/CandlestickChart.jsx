@@ -13,10 +13,10 @@ const PATTERN_DISCLAIMER = 'Pattern detection is for research only and does not 
 const INDICATOR_VISIBILITY_KEY = 'marketScanner.chart.indicatorVisibility.v1';
 
 const EMA_SERIES = [
-  { key: 'ema_9', name: 'EMA 9', period: 9, color: INDICATOR_COLORS.ema9 },
-  { key: 'ema_20', name: 'EMA 20', period: 20, color: INDICATOR_COLORS.ema20 },
-  { key: 'ema_50', name: 'EMA 50', period: 50, color: INDICATOR_COLORS.ema50 },
-  { key: 'ema_200', name: 'EMA 200', period: 200, color: INDICATOR_COLORS.ema200 },
+  { key: 'ema_9', name: 'EMA 9', shortName: 'EMA9', period: 9, color: INDICATOR_COLORS.ema9 },
+  { key: 'ema_20', name: 'EMA 20', shortName: 'EMA20', period: 20, color: INDICATOR_COLORS.ema20 },
+  { key: 'ema_50', name: 'EMA 50', shortName: 'EMA50', period: 50, color: INDICATOR_COLORS.ema50 },
+  { key: 'ema_200', name: 'EMA 200', shortName: 'EMA200', period: 200, color: INDICATOR_COLORS.ema200 },
 ];
 
 const BOLLINGER_OPTIONS = {
@@ -373,27 +373,29 @@ const CandlestickChart = memo(function CandlestickChart({
   }
 
   return (
-    <div ref={chartShellRef} className="relative rounded-xl overflow-hidden bg-scanner-bg" style={{ height }}>
-      <div ref={containerRef} className="chart-container h-full" />
-      <canvas
-        ref={patternCanvasRef}
-        className="absolute inset-0 z-10 h-full w-full pointer-events-none"
-        aria-hidden="true"
-      />
+    <div className="space-y-2">
       <IndicatorLegend items={legendItems} onToggle={toggleIndicator} />
-      <div className="absolute right-3 top-3 z-20 flex items-center gap-2">
-        <button
-          type="button"
-          onClick={handleDetectPatterns}
-          disabled={isDetectingPattern}
-          className="inline-flex h-9 items-center gap-2 rounded-lg border border-scanner-border bg-scanner-surface/95 px-3 text-xs font-semibold text-scanner-text shadow-scanner-sm transition-colors hover:border-scanner-accent/60 hover:text-scanner-accent disabled:cursor-wait disabled:opacity-70"
-        >
-          {isDetectingPattern ? <Loader2 size={14} className="animate-spin" /> : <Camera size={14} />}
-          Detect Patterns
-        </button>
-      </div>
+      <div ref={chartShellRef} className="relative rounded-xl overflow-hidden bg-scanner-bg" style={{ height }}>
+        <div ref={containerRef} className="chart-container h-full" />
+        <canvas
+          ref={patternCanvasRef}
+          className="absolute inset-0 z-10 h-full w-full pointer-events-none"
+          aria-hidden="true"
+        />
+        <div className="absolute right-3 top-3 z-20 flex items-center gap-2">
+          <button
+            type="button"
+            onClick={handleDetectPatterns}
+            disabled={isDetectingPattern}
+            className="inline-flex h-9 items-center gap-2 rounded-lg border border-scanner-border bg-scanner-surface/95 px-3 text-xs font-semibold text-scanner-text shadow-scanner-sm transition-colors hover:border-scanner-accent/60 hover:text-scanner-accent disabled:cursor-wait disabled:opacity-70"
+          >
+            {isDetectingPattern ? <Loader2 size={14} className="animate-spin" /> : <Camera size={14} />}
+            Detect Patterns
+          </button>
+        </div>
 
-      <PatternDetectionStatus result={patternResult} error={patternError} />
+        <PatternDetectionStatus result={patternResult} error={patternError} />
+      </div>
     </div>
   );
 });
@@ -513,7 +515,7 @@ function buildIndicatorDefinitions(chartData, visibility) {
   const legend = [];
 
   if (visibility.showEma) {
-    EMA_SERIES.forEach(({ key, name, period, color }) => {
+    EMA_SERIES.forEach(({ key, name, shortName, period, color }) => {
       const emaData = computeEMA(closePrices, period);
       if (emaData.length === 0) return;
 
@@ -522,6 +524,7 @@ function buildIndicatorDefinitions(chartData, visibility) {
         seriesKey: key,
         legendKey: key,
         name,
+        shortName,
         color,
         data: lineData,
         priceScaleId: 'right',
@@ -564,6 +567,7 @@ function buildIndicatorDefinitions(chartData, visibility) {
       legend.push({
         key: 'bollinger_bands',
         name: 'Bollinger Bands',
+        shortName: 'BB',
         color: INDICATOR_COLORS.bollingerBands,
         value: formatBandValue(latestUpper, latestLower),
         valuesByTime,
@@ -587,6 +591,7 @@ function buildIndicatorDefinitions(chartData, visibility) {
         seriesKey: 'macd_line',
         legendKey: 'macd_line',
         name: 'MACD',
+        shortName: 'MACD',
         color: INDICATOR_COLORS.macdLine,
         data: lineData,
         priceScaleId: 'macd',
@@ -596,6 +601,7 @@ function buildIndicatorDefinitions(chartData, visibility) {
         seriesKey: 'macd_signal',
         legendKey: 'macd_signal',
         name: 'MACD Signal',
+        shortName: 'Signal',
         color: INDICATOR_COLORS.macdSignal,
         data: signalData,
         priceScaleId: 'macd',
@@ -605,6 +611,7 @@ function buildIndicatorDefinitions(chartData, visibility) {
         seriesKey: 'macd_histogram',
         legendKey: 'macd_histogram',
         name: 'MACD Hist',
+        shortName: 'Hist',
         color: INDICATOR_COLORS.macdHistogram,
         data: histogramData,
         priceScaleId: 'macd',
@@ -620,6 +627,7 @@ function buildIndicatorDefinitions(chartData, visibility) {
         seriesKey: 'rsi',
         legendKey: 'rsi',
         name: 'RSI',
+        shortName: 'RSI',
         color: INDICATOR_COLORS.rsi,
         data: rsiData,
         priceScaleId: 'rsi',
@@ -663,7 +671,7 @@ function addHistogramDefinition(series, legend, definition) {
   legend.push(buildLegendItem(definition));
 }
 
-function buildLegendItem({ legendKey, name, color, data, formatter }) {
+function buildLegendItem({ legendKey, name, shortName, color, data, formatter }) {
   const valuesByTime = new Map();
   data.forEach((point) => {
     valuesByTime.set(point.time, formatter(point.value));
@@ -672,6 +680,7 @@ function buildLegendItem({ legendKey, name, color, data, formatter }) {
   return {
     key: legendKey,
     name,
+    shortName,
     color,
     value: formatter(lastSeriesValue(data)),
     valuesByTime,
