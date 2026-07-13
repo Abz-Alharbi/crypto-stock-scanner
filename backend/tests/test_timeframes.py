@@ -40,3 +40,24 @@ def test_timeframe_validation_is_case_sensitive():
 
 def test_timeframe_map_contains_only_canonical_keys():
     assert tuple(TIMEFRAME_MAP.keys()) == EXPECTED_TIMEFRAMES
+
+
+def test_current_scan_request_silently_ignores_unknown_domain_context():
+    request = ScanRequest.model_validate(
+        {
+            "market": "crypto",
+            "timeframe": "1D",
+            "filters": ["rsi_oversold"],
+            "limit": 5,
+            "asset_class": "crypto",
+            "venue": "GLOBAL_CRYPTO",
+            "universe": "crypto_usd_top",
+        }
+    )
+
+    assert request.model_dump() == {
+        "market": "crypto",
+        "timeframe": "1D",
+        "filters": ["rsi_oversold"],
+        "limit": 5,
+    }

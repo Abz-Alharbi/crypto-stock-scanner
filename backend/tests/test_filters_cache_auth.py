@@ -5,7 +5,7 @@ from backend.errors import ApiError
 from backend.extensions import db
 from backend.models.user import User
 from backend.services import cache as cache_service
-from backend.services.scans import get_flat_filters
+from backend.services.scans import FILTER_PRESETS, get_flat_filters
 
 
 def _analysis():
@@ -51,6 +51,15 @@ def test_filter_logic_matches_expected_conditions():
 
     assert not filters["rsi_overbought"]["check"](analysis)
     assert not filters["macd_bearish"]["check"](analysis)
+
+
+def test_current_bullish_momentum_preset_preserves_constituent_predicates():
+    assert FILTER_PRESETS["bullish_momentum"]["filters"] == [
+        "rsi_oversold",
+        "macd_bullish",
+        "ema_golden_cross",
+        "bullish_pattern",
+    ]
 
 
 def test_cache_get_honors_entry_ttl(monkeypatch):

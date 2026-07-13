@@ -10,8 +10,11 @@ os.environ.setdefault("SCAN_QUEUE_SYNC", "true")
 os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 
 from backend.auth import service as auth_service
+from backend.domain import AssetClass
 from backend.extensions import db
 from backend.factory import create_app
+from backend.providers import provider_override
+from backend.tests.fake_provider import FakeProvider
 
 
 class MockPolygonClient:
@@ -142,13 +145,59 @@ def isolated_cache(monkeypatch):
     cache._cache.clear()
 
 
+@pytest.fixture(autouse=True)
+def fake_provider():
+    bars = [
+        {
+            "t": index,
+            "o": 100 + index,
+            "h": 102 + index,
+            "l": 99 + index,
+            "c": 101 + index,
+            "v": 1_000_000 + index,
+        }
+        for index in range(60)
+    ]
+    provider = FakeProvider(default_bars=bars)
+    provider.search_results.update(
+        {
+            AssetClass.EQUITY: [
+                {
+                    "ticker": "AAPL",
+                    "name": "Apple Inc.",
+                    "market": "stocks",
+                    "type": "CS",
+                    "currency_name": "USD",
+                }
+            ],
+            AssetClass.CRYPTO: [
+                {
+                    "ticker": "X:BTCUSD",
+                    "name": "Bitcoin USD",
+                    "market": "crypto",
+                    "type": "crypto",
+                    "currency_name": "USD",
+                }
+            ],
+        }
+    )
+    provider.ticker_details_by_symbol["AAPL"] = {
+        "ticker": "AAPL",
+        "name": "AAPL Test Asset",
+        "market": "stocks",
+        "locale": "us",
+        "primary_exchange": "XNAS",
+    }
+    with provider_override(provider):
+        yield provider
+
+
 @pytest.fixture
 def mock_polygon(monkeypatch):
     client = MockPolygonClient()
 
-    from backend.services import fundamentals, scans
+    from backend.services import fundamentals
 
-    monkeypatch.setattr(scans, "polygon", client)
     monkeypatch.setattr(fundamentals, "polygon", client)
 
     try:
@@ -194,4 +243,3 @@ def admin_headers(app):
         admin, _created = auth_service.create_admin("admin@example.test", "AdminPass123")
         token = auth_service.generate_token(admin.id)
     return {"Authorization": f"Bearer {token}"}
-

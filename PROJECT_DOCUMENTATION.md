@@ -1,6 +1,6 @@
 # Market Scanner Pro - Project Documentation
 
-Last regenerated: 2026-07-08
+Last regenerated: 2026-07-13
 
 This document was regenerated from the current codebase. It intentionally does not treat the previous `PROJECT_DOCUMENTATION.md` as a source of truth.
 
@@ -50,6 +50,10 @@ Current backend layout:
 | `backend/api/` | Thin route modules. Most routes validate, call a service, then return JSON. |
 | `backend/schemas/` | Pydantic request/query schemas and parse helpers. |
 | `backend/clients/polygon.py` | Polygon/Massive transport only. Timeout, retries, concurrency, cache, circuit breaker. |
+| `backend/domain/` | Typed asset-class, instrument, timeframe, and market-data request values. |
+| `backend/providers/` | Provider-neutral market-data protocol and Polygon adapter. |
+| `backend/strategies/` | Strategy contract, built-in registry, 22 legacy filter adapters, capability configuration, and RSI demo strategy. |
+| `backend/strategy_runtime.py` | Compatibility and orchestration facade over the strategy registry. |
 | `backend/services/` | Business logic for scans, indicators, cache, Redis, patterns, news, fundamentals, watchlist, templates, notifications, universe. |
 | `backend/jobs/` | RQ job bodies for scans, template sweeps, and universe rebuilds. |
 
@@ -111,7 +115,8 @@ Provider endpoints used:
 Transport behavior:
 
 - Per-request timeout is 10 seconds.
-- 429 and transient failures retry iteratively with exponential backoff and jitter, max 3 retries.
+- Network timeouts/connection failures and HTTP 429 responses retry iteratively with exponential backoff and jitter, max 3 retries; 429 honors `Retry-After`.
+- HTTP 5xx responses record a circuit-breaker failure but return without retry, and other `RequestException` failures also return after the first attempt.
 - Circuit breaker opens after 5 consecutive failures and pauses requests for 60 seconds.
 - Controlled concurrency uses a semaphore, default `POLYGON_MAX_CONCURRENT_REQUESTS=10`.
 - There is no free-tier artificial serial delay in the current client.
@@ -231,7 +236,7 @@ The scanner requires at least 30 bars per symbol for full analysis. Timeframe fe
 | `1M` | 1 | month | higher |
 | `1Y` | 1 | year | higher |
 
-Each config also includes `days`, `min_bars`, `label`, `short_label`, and `available`.
+Each internal config includes `days`, `min_bars`, `label`, and `short_label`. The public `/api/filters` timeframe payload exports `label`, `short_label`, `multiplier`, `timespan`, `category`, and the config-driven `available` capability flag; it intentionally does not expose internal lookback fields such as `days` or `min_bars`. The same response now publishes each registered strategy's version, parameter schema, required history and indicators, supported asset classes/timeframes, and availability.
 
 ## Pattern Detection
 
@@ -266,9 +271,9 @@ Signal resolver priority logic:
 
 | Condition | Result |
 |---|---|
-| YOLO confidence >= threshold and TA/internal patterns confirm same pattern | `signal_priority=1`, `source_badge="YOLOv8 + TA-Lib"`, `talib_conflict=false` |
-| YOLO confidence >= threshold and TA/internal patterns are absent/inconclusive | `signal_priority=2`, `source_badge="YOLOv8"`, `talib_conflict=false` |
-| YOLO confidence >= threshold and TA/internal patterns detect a different pattern | `signal_priority=2`, `source_badge="YOLOv8"`, `talib_conflict=true` |
+| YOLO confidence >= threshold and custom deterministic patterns confirm the same pattern | `signal_priority=1`, legacy `source_badge="YOLOv8 + TA-Lib"`, `talib_conflict=false` |
+| YOLO confidence >= threshold and custom deterministic patterns are absent/inconclusive | `signal_priority=2`, `source_badge="YOLOv8"`, `talib_conflict=false` |
+| YOLO confidence >= threshold and custom deterministic patterns detect a different pattern | `signal_priority=2`, `source_badge="YOLOv8"`, `talib_conflict=true` |
 | YOLO confidence < threshold | Suppressed; `signal_priority=null`, no TA-only primary signal |
 
 `POST /api/patterns/detect`:
@@ -276,7 +281,7 @@ Signal resolver priority logic:
 - Requires auth.
 - Rate-limited to 10 requests/minute per user through Redis.
 - Accepts `{ image, symbol?, timeframe? }`.
-- If symbol and timeframe are present, it fetches the same pair's market bars and uses internal pattern analysis as the TA confirmation source.
+- If symbol and timeframe are present, it fetches the same instrument's market bars and uses the application's custom deterministic pattern analysis as confirmation. There is no external TA-Lib dependency; `talib_*` names and the `YOLOv8 + TA-Lib` badge are legacy labels scheduled for correction in Phase 10.
 - Writes an annotated screenshot under `logs/pattern_detections/<user_id>/screenshots/`.
 - Appends an XLSX row under `logs/pattern_detections/<user_id>/<YYYY-MM-DD>.xlsx`.
 - Response is the full signal payload, or `{ error, signal_priority: null }` on user-facing detection errors.
@@ -335,9 +340,9 @@ Pattern UI:
 - "Detect Patterns" button captures visible chart canvases.
 - Bounding boxes draw on a canvas layer above the chart.
 - Signal badge colors:
-  - `YOLOv8 + TA-Lib`: green.
+  - Legacy `YOLOv8 + TA-Lib` (YOLO plus custom deterministic analysis, not the TA-Lib package): green.
   - `YOLOv8`: blue.
-- TA conflict shows an amber warning icon with tooltip text.
+- A custom-deterministic-analysis conflict shows an amber warning icon with tooltip text; response fields still use legacy `talib_*` names.
 - Every pattern/signal display includes: "Pattern detection is for research only and does not constitute financial advice."
 
 ## Frontend Structure
@@ -367,6 +372,12 @@ State:
 - Market, filters, scans, details, watchlist, templates, and notifications live in `frontend/src/store/useMarketStore.js`.
 - There is no separate `useWatchlistStore.js` in the current tree.
 - Theme state lives in `frontend/src/store/useThemeStore.js`.
+
+Scanner market selection:
+
+- `frontend/src/components/common/Header.jsx` exposes Stocks/Crypto buttons in both desktop and mobile navigation.
+- Both choices use the same scanner page. The control sets `useMarketStore.activeMarket`, which supplies the `market` field for search and scan requests.
+- This is an asset-class-level toggle only; the current UI does not select NASDAQ versus NYSE, a crypto venue, a pair universe, or an individual symbol for bulk scans.
 
 API client:
 
@@ -419,7 +430,7 @@ SQLAlchemy models:
 | Model | Table | Notes |
 |---|---|---|
 | `User` | `users` | Unique `username` and `email`; role constraint `user/admin`; plan constraint `free/premium`; password hash; active flag. |
-| `Watchlist` | `watchlist` | User-owned saved symbols; unique `(user_id, symbol)`; stores `symbol`, `provider_symbol`, `display_symbol`, `market`, `notes`. |
+| `Watchlist` | `watchlists` | User-owned saved symbols; unique `(user_id, symbol)`; stores `symbol`, `provider_symbol`, `display_symbol`, `market`, `notes`. |
 | `ScanResult` | `scan_results` | Completed scan matches linked to `user_id` and `job_id`; stores canonical symbol fields, filters, indicators, price, volume, signal. |
 | `ScanHistory` | `scan_history` | One row per completed scan with market, timeframe, totals, filters, duration, job id. |
 | `ScanTemplate` | `scan_templates` | User-owned named scan criteria JSON. |
@@ -614,7 +625,7 @@ Confirmed current behavior:
 
 Implemented differently than earlier plans:
 
-- Pattern confirmation names use internal technical-analysis pattern output. The code calls this TA-style confirmation, but there is no external `TA-Lib` dependency in current requirements.
+- Pattern confirmation uses custom deterministic pattern-analysis output. The current code and UI retain legacy `talib_*` names and a `YOLOv8 + TA-Lib` badge, but there is no external TA-Lib dependency in current requirements; Phase 10 owns the rename and compatibility aliases.
 - Universe save is transactional delete/insert in the same table, not a separate staging/batch table swap.
 - News and fundamentals are protected by frontend route guards, but the backend endpoints are not token-protected.
 - `services/cache.py` still has an in-memory fallback if Redis is unavailable. Redis is preferred, but cache state is not strictly Redis-only in degraded local mode.
@@ -632,4 +643,3 @@ Stale or cleanup candidates:
 TODO/FIXME scan:
 
 - A source scan for `TODO`, `FIXME`, `XXX`, and `HACK` found no active markers in the scanned project files after excluding generated dependency/output folders.
-

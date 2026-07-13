@@ -9,9 +9,10 @@ from flask import current_app, has_app_context
 from sqlalchemy import func
 from sqlalchemy.exc import SQLAlchemyError
 
-from backend.clients.polygon import polygon
+from backend.domain import AssetClass
 from backend.extensions import db
 from backend.models.universe import UniverseSymbol
+from backend.providers import get_provider
 from backend.services.redis_store import get_redis_client
 from backend.services.scan_jobs import SCAN_JOB_TIMEOUT_SECONDS, get_scan_queue
 
@@ -51,11 +52,15 @@ def _extract_symbol(item):
     return str(item.get("ticker") or item.get("symbol") or item.get("T") or "").upper().strip()
 
 
-def fetch_eligible_symbols():
+def fetch_eligible_symbols(provider=None):
+    provider = provider or get_provider()
     eligible = {}
     counts = {}
     for exchange, config in EXCHANGE_CONFIG.items():
-        rows = polygon.get_reference_tickers(config["polygon_exchange"])
+        rows = provider.reference_universe(
+            AssetClass.EQUITY,
+            config["polygon_exchange"],
+        )
         symbols = {
             symbol
             for item in rows
@@ -74,22 +79,26 @@ def fetch_eligible_symbols():
     return eligible, counts
 
 
-def _fetch_grouped_day(day):
+def _fetch_grouped_day(day, provider):
     date_text = day.isoformat()
     try:
-        return date_text, polygon.get_grouped_daily_stocks(date_text), None
+        return date_text, provider.grouped_daily_stocks(date_text), None
     except Exception as exc:
         return date_text, [], str(exc)
 
 
-def build_volume_history(eligible_symbols, lookback_days):
+def build_volume_history(eligible_symbols, lookback_days, provider=None):
+    provider = provider or get_provider()
     volume_sum = defaultdict(float)
     volume_count = defaultdict(int)
     processed_days = 0
     skipped_days = 0
     skipped_samples = []
     dates = list(_date_range(lookback_days))
-    max_workers = max(1, int(getattr(polygon, "max_concurrent_requests", _int_config("POLYGON_MAX_CONCURRENT_REQUESTS", 10))))
+    max_workers = max(
+        1,
+        int(getattr(provider, "max_concurrent_requests", _int_config("POLYGON_MAX_CONCURRENT_REQUESTS", 10))),
+    )
 
     symbol_exchange = {}
     for exchange, symbols in eligible_symbols.items():
@@ -97,7 +106,7 @@ def build_volume_history(eligible_symbols, lookback_days):
             symbol_exchange[symbol] = exchange
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        future_map = {executor.submit(_fetch_grouped_day, day): day for day in dates}
+        future_map = {executor.submit(_fetch_grouped_day, day, provider): day for day in dates}
         for future in as_completed(future_map):
             date_text, rows, error = future.result()
             if error or not rows:
@@ -185,8 +194,13 @@ def build_and_save_universe():
     started = time.time()
     lookback_days = _int_config("UNIVERSE_LOOKBACK_DAYS", 730)
     computed_at = datetime.utcnow()
-    eligible_symbols, reference_counts = fetch_eligible_symbols()
-    volume_sum, volume_count, processed_days, skipped_days = build_volume_history(eligible_symbols, lookback_days)
+    provider = get_provider()
+    eligible_symbols, reference_counts = fetch_eligible_symbols(provider)
+    volume_sum, volume_count, processed_days, skipped_days = build_volume_history(
+        eligible_symbols,
+        lookback_days,
+        provider,
+    )
     records, final_counts = rank_symbols(eligible_symbols, volume_sum, volume_count, computed_at)
 
     logger.info(

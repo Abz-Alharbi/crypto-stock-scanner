@@ -186,6 +186,11 @@ test('registers, logs in, runs a scan, adds to watchlist, and views admin panel'
 
   await expect(page.getByRole('button', { name: /admin_user/i })).toBeVisible()
 
+  await page.getByRole('button', { name: /crypto/i }).click()
+  await expect(page.getByPlaceholder(/Search crypto/i)).toBeVisible()
+  await page.getByRole('button', { name: /stocks/i }).click()
+  await expect(page.getByPlaceholder(/Search stocks/i)).toBeVisible()
+
   await page.getByRole('button', { name: /RSI Oversold/i }).click()
   await page.getByRole('button', { name: /run scan \(1 filter\)/i }).click()
 

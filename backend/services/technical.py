@@ -714,10 +714,26 @@ class TechnicalAnalysis:
         return patterns
 
     @staticmethod
-    def full_analysis(bars):
-        """Run complete technical analysis on OHLCV bars"""
+    def full_analysis(bars, features=None):
+        """Run technical analysis, optionally limited to named feature families.
+
+        ``features=None`` preserves the historical complete response. A selected
+        feature set is used by registry-driven scans before a matching result
+        needs the complete legacy response payload.
+        """
         if not bars or len(bars) < 30:
             return None
+
+        all_features = {
+            'rsi', 'macd', 'ema', 'sma', 'bollinger_bands', 'stochastic',
+            'fibonacci', 'candlestick_patterns', 'chart_patterns', 'trade_setup'
+        }
+        requested = all_features if features is None else set(features)
+        unknown = requested - all_features
+        if unknown:
+            raise ValueError(f"Unknown analysis features: {', '.join(sorted(unknown))}")
+        # A trade setup is a composite presentation that consumes every feature.
+        computed = all_features if 'trade_setup' in requested else requested
 
         opens = [b['o'] for b in bars]
         highs = [b['h'] for b in bars]
@@ -729,21 +745,48 @@ class TechnicalAnalysis:
         prev_price = closes[-2] if len(closes) > 1 else last_price
         change_pct = ((last_price - prev_price) / prev_price * 100) if prev_price else 0
 
-        # Calculate all indicators
-        rsi = TechnicalAnalysis.calculate_rsi(closes)
-        macd, macd_signal, macd_hist = TechnicalAnalysis.calculate_macd(closes)
-        ema_9 = TechnicalAnalysis.calculate_ema(closes, 9)
-        ema_20 = TechnicalAnalysis.calculate_ema(closes, 20)
-        ema_50 = TechnicalAnalysis.calculate_ema(closes, 50)
-        ema_200 = TechnicalAnalysis.calculate_ema(closes, 200)
-        sma_20 = TechnicalAnalysis.calculate_sma(closes, 20)
-        sma_50 = TechnicalAnalysis.calculate_sma(closes, 50)
-        sma_200 = TechnicalAnalysis.calculate_sma(closes, 200)
-        bb_upper, bb_middle, bb_lower = TechnicalAnalysis.calculate_bollinger_bands(closes)
-        stoch_k, stoch_d = TechnicalAnalysis.calculate_stochastic(highs, lows, closes)
-        fib_levels = TechnicalAnalysis.calculate_fibonacci_levels(closes)
-        candle_patterns = TechnicalAnalysis.detect_candlestick_patterns(opens, highs, lows, closes)
-        chart_patterns = TechnicalAnalysis.detect_chart_patterns(closes)
+        rsi = TechnicalAnalysis.calculate_rsi(closes) if 'rsi' in computed else None
+        macd, macd_signal, macd_hist = (
+            TechnicalAnalysis.calculate_macd(closes)
+            if 'macd' in computed else (None, None, None)
+        )
+        ema_9, ema_20, ema_50, ema_200 = (
+            (
+                TechnicalAnalysis.calculate_ema(closes, 9),
+                TechnicalAnalysis.calculate_ema(closes, 20),
+                TechnicalAnalysis.calculate_ema(closes, 50),
+                TechnicalAnalysis.calculate_ema(closes, 200),
+            )
+            if 'ema' in computed else (None, None, None, None)
+        )
+        sma_20, sma_50, sma_200 = (
+            (
+                TechnicalAnalysis.calculate_sma(closes, 20),
+                TechnicalAnalysis.calculate_sma(closes, 50),
+                TechnicalAnalysis.calculate_sma(closes, 200),
+            )
+            if 'sma' in computed else (None, None, None)
+        )
+        bb_upper, bb_middle, bb_lower = (
+            TechnicalAnalysis.calculate_bollinger_bands(closes)
+            if 'bollinger_bands' in computed else (None, None, None)
+        )
+        stoch_k, stoch_d = (
+            TechnicalAnalysis.calculate_stochastic(highs, lows, closes)
+            if 'stochastic' in computed else (None, None)
+        )
+        fib_levels = (
+            TechnicalAnalysis.calculate_fibonacci_levels(closes)
+            if 'fibonacci' in computed else None
+        )
+        candle_patterns = (
+            TechnicalAnalysis.detect_candlestick_patterns(opens, highs, lows, closes)
+            if 'candlestick_patterns' in computed else []
+        )
+        chart_patterns = (
+            TechnicalAnalysis.detect_chart_patterns(closes)
+            if 'chart_patterns' in computed else []
+        )
 
         # Fill fibonacci nearest levels
         if fib_levels:
@@ -775,7 +818,7 @@ class TechnicalAnalysis:
                 signals.append('MACD bearish crossover')
                 bearish_count += 1
 
-        if ema_50 and ema_200:
+        if ema_50 is not None and ema_200 is not None:
             if ema_50 > ema_200:
                 signals.append('Golden Cross (EMA 50 > 200)')
                 bullish_count += 1
@@ -783,7 +826,7 @@ class TechnicalAnalysis:
                 signals.append('Death Cross (EMA 50 < 200)')
                 bearish_count += 1
 
-        if bb_lower and bb_upper:
+        if bb_lower is not None and bb_upper is not None:
             if last_price <= bb_lower:
                 signals.append('Price at lower Bollinger Band (bullish)')
                 bullish_count += 1
@@ -817,18 +860,21 @@ class TechnicalAnalysis:
             overall_signal = 'bearish'
 
         indicators_dict = {
-            'rsi': round(rsi, 2) if rsi else None,
-            'macd': {'line': round(macd, 4) if macd else None, 'signal': round(macd_signal, 4) if macd_signal else None, 'histogram': round(macd_hist, 4) if macd_hist else None},
-            'ema': {'ema_9': round(ema_9, 2) if ema_9 else None, 'ema_20': round(ema_20, 2) if ema_20 else None, 'ema_50': round(ema_50, 2) if ema_50 else None, 'ema_200': round(ema_200, 2) if ema_200 else None},
-            'sma': {'sma_20': round(sma_20, 2) if sma_20 else None, 'sma_50': round(sma_50, 2) if sma_50 else None, 'sma_200': round(sma_200, 2) if sma_200 else None},
-            'bollinger_bands': {'upper': round(bb_upper, 2) if bb_upper else None, 'middle': round(bb_middle, 2) if bb_middle else None, 'lower': round(bb_lower, 2) if bb_lower else None},
-            'stochastic': {'k': round(stoch_k, 2) if stoch_k else None, 'd': round(stoch_d, 2) if stoch_d else None},
+            'rsi': round(rsi, 2) if rsi is not None else None,
+            'macd': {'line': round(macd, 4) if macd is not None else None, 'signal': round(macd_signal, 4) if macd_signal is not None else None, 'histogram': round(macd_hist, 4) if macd_hist is not None else None},
+            'ema': {'ema_9': round(ema_9, 2) if ema_9 is not None else None, 'ema_20': round(ema_20, 2) if ema_20 is not None else None, 'ema_50': round(ema_50, 2) if ema_50 is not None else None, 'ema_200': round(ema_200, 2) if ema_200 is not None else None},
+            'sma': {'sma_20': round(sma_20, 2) if sma_20 is not None else None, 'sma_50': round(sma_50, 2) if sma_50 is not None else None, 'sma_200': round(sma_200, 2) if sma_200 is not None else None},
+            'bollinger_bands': {'upper': round(bb_upper, 2) if bb_upper is not None else None, 'middle': round(bb_middle, 2) if bb_middle is not None else None, 'lower': round(bb_lower, 2) if bb_lower is not None else None},
+            'stochastic': {'k': round(stoch_k, 2) if stoch_k is not None else None, 'd': round(stoch_d, 2) if stoch_d is not None else None},
         }
 
-        trade_setup = TechnicalAnalysis.calculate_trade_setup(
-            closes, highs, lows, opens, volumes,
-            indicators_dict, fib_levels, overall_signal,
-            candle_patterns, chart_patterns
+        trade_setup = (
+            TechnicalAnalysis.calculate_trade_setup(
+                closes, highs, lows, opens, volumes,
+                indicators_dict, fib_levels, overall_signal,
+                candle_patterns, chart_patterns
+            )
+            if 'trade_setup' in requested else None
         )
 
         return {

@@ -1,10 +1,12 @@
 from typing import Optional
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 
+from backend.domain import AssetClass, Timeframe
 from backend.errors import ApiError
 from backend.market_config import TIMEFRAME_CONFIG, normalize_timeframe
 from backend.schemas.common import ApiModel
+from backend.strategy_runtime import validate_strategy_selection
 from backend.symbols import canonicalize_symbol
 
 VALID_MARKETS = {"stocks", "crypto"}
@@ -32,6 +34,15 @@ class ScanRequest(ApiModel):
         if value not in VALID_TIMEFRAMES:
             raise ValueError("Invalid timeframe")
         return value
+
+    @model_validator(mode="after")
+    def validate_strategies(self):
+        validate_strategy_selection(
+            self.filters,
+            asset_class=AssetClass.from_wire(self.market),
+            timeframe=Timeframe(self.timeframe),
+        )
+        return self
 
 
 class ScanTemplateCreateRequest(ApiModel):
@@ -64,6 +75,15 @@ class ScanTemplateCreateRequest(ApiModel):
         if value not in VALID_TIMEFRAMES:
             raise ValueError("Invalid timeframe")
         return value
+
+    @model_validator(mode="after")
+    def validate_strategies(self):
+        validate_strategy_selection(
+            self.filters,
+            asset_class=AssetClass.from_wire(self.market),
+            timeframe=Timeframe(self.timeframe),
+        )
+        return self
 
 
 class SearchQuery(ApiModel):

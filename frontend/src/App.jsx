@@ -12,6 +12,7 @@ import RouteErrorBoundary from './components/common/RouteErrorBoundary';
 import useMarketStore from './store/useMarketStore';
 import useAuthStore, { AUTH_DISABLED } from './store/useAuthStore';
 import useThemeStore from './store/useThemeStore';
+import { getFooterUniverseCounts } from './utils/footerUniverseCounts';
 
 const AdminPanel = lazy(() => import('./components/admin/AdminPanel'));
 const NewsRoom = lazy(() => import('./components/news/NewsRoom'));
@@ -147,6 +148,7 @@ function AppShell() {
   }, []);
 
   const isDark = theme === 'dark';
+  const footerUniverseCounts = getFooterUniverseCounts(apiStatus);
 
   return (
     <div className="noise-bg min-h-screen flex flex-col">
@@ -216,7 +218,7 @@ function AppShell() {
               )}
             </div>
             {apiStatus && (
-              <span>Stocks: {apiStatus.stock_symbols} | Crypto: {apiStatus.crypto_symbols}</span>
+              <span>Stocks: {footerUniverseCounts.stocks} | Crypto: {footerUniverseCounts.crypto}</span>
             )}
             <span>âš ï¸ Not financial advice</span>
           </div>

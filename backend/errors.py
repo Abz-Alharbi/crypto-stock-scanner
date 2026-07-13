@@ -34,6 +34,8 @@ def _pydantic_details(exc):
 
 
 def register_error_handlers(app):
+    from backend.providers import ProviderError
+
     @app.errorhandler(ApiError)
     def handle_api_error(exc):
         return error_response(exc.message, exc.status_code, exc.code, exc.details)
@@ -45,6 +47,15 @@ def register_error_handlers(app):
             400,
             "validation_error",
             _pydantic_details(exc),
+        )
+
+    @app.errorhandler(ProviderError)
+    def handle_provider_error(exc):
+        return error_response(
+            "Market-data provider request failed",
+            502,
+            "provider_error",
+            exc.to_dict(),
         )
 
     @app.errorhandler(404)

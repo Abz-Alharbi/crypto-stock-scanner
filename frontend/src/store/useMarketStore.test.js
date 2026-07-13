@@ -204,6 +204,38 @@ describe('scan store', () => {
     })
   })
 
+  it('submits the active crypto market through the normal scan action', async () => {
+    apiMocks.marketAPI.scan.mockResolvedValueOnce({ data: { job_id: 'job-crypto' } })
+    apiMocks.marketAPI.getScanStatus.mockResolvedValueOnce({
+      data: {
+        status: 'completed',
+        progress: 100,
+        results: [{ provider_symbol: 'X:BTCUSD', display_symbol: 'BTCUSD', market: 'crypto' }],
+        meta: { market: 'crypto', total_scanned: 15, duration_seconds: 0.5, timeframe: '4H' },
+      },
+    })
+    useMarketStore.setState({ selectedFilters: ['macd_bullish'], activeMarket: 'crypto', timeframe: '4H' })
+
+    const scanPromise = useMarketStore.getState().runScan()
+    await Promise.resolve()
+
+    expect(apiMocks.marketAPI.scan).toHaveBeenCalledWith({
+      market: 'crypto',
+      filters: ['macd_bullish'],
+      timeframe: '4H',
+      limit: 30,
+    })
+
+    await vi.advanceTimersByTimeAsync(1000)
+    await scanPromise
+
+    expect(useMarketStore.getState()).toMatchObject({
+      isScanning: false,
+      scanResults: [{ provider_symbol: 'X:BTCUSD', display_symbol: 'BTCUSD', market: 'crypto' }],
+      scanMeta: { market: 'crypto', total_scanned: 15, duration_seconds: 0.5, timeframe: '4H' },
+    })
+  })
+
   it('sets a validation error when no filters are selected', async () => {
     await useMarketStore.getState().runScan()
 

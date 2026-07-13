@@ -2,6 +2,7 @@ import pytest
 
 from backend.errors import ApiError
 from backend.extensions import db
+from backend.models.scan import ScanHistory, ScanResult
 from backend.models.universe import UniverseSymbol
 from backend.services import scans
 
@@ -24,54 +25,20 @@ def _bars_without_bearish_patterns():
     return bars
 
 
-class EmptyPolygonClient:
-    api_key = "test-polygon-key"
-
-    def __init__(self):
-        self.last_error = None
-
-    def get_aggregates(self, symbol, timespan="day", multiplier=1, from_date=None, to_date=None):
-        self.last_error = {
-            "type": "http_error",
-            "message": "Unauthorized",
-            "status_code": 401,
-        }
-        return []
+def _short_bars(count=20):
+    return [
+        {"t": index, "o": 100 + index, "h": 102 + index, "l": 99 + index, "c": 101 + index, "v": 1000}
+        for index in range(count)
+    ]
 
 
-class StaticBarsPolygonClient:
-    api_key = "test-polygon-key"
-    last_error = None
-
-    def __init__(self, bars):
-        self.bars = bars
-
-    def get_aggregates(self, symbol, timespan="day", multiplier=1, from_date=None, to_date=None):
-        return self.bars
-
-
-class RecordingBarsPolygonClient(StaticBarsPolygonClient):
-    def __init__(self, bars):
-        super().__init__(bars)
-        self.calls = []
-
-    def get_aggregates(self, symbol, timespan="day", multiplier=1, from_date=None, to_date=None):
-        self.calls.append(
-            {
-                "symbol": symbol,
-                "timespan": timespan,
-                "multiplier": multiplier,
-                "from_date": from_date,
-                "to_date": to_date,
-            }
-        )
-        return self.bars
-
-
-def test_scan_market_reports_provider_failure_when_no_symbols_have_data(monkeypatch):
-    polygon = EmptyPolygonClient()
-
-    monkeypatch.setattr(scans, "polygon", polygon)
+def test_scan_market_reports_provider_failure_when_no_symbols_have_data(monkeypatch, fake_provider):
+    fake_provider.fail(
+        "get_bars",
+        message="Unauthorized",
+        error_type="http_error",
+        status_code=401,
+    )
     monkeypatch.setattr(scans, "ALL_STOCK_SYMBOLS", ["AAPL", "MSFT"])
 
     with pytest.raises(ApiError) as exc:
@@ -83,12 +50,23 @@ def test_scan_market_reports_provider_failure_when_no_symbols_have_data(monkeypa
     assert exc.value.details["attempted"] == 2
     assert exc.value.details["no_data"] == 2
     assert exc.value.details["provider_error"]["status_code"] == 401
+    assert exc.value.details["symbol_failures"][0] == {
+        "symbol": "AAPL",
+        "message": "Unauthorized",
+        "provider": "fake",
+        "operation": "get_bars",
+        "error_type": "http_error",
+        "status_code": 401,
+        "instrument": "AAPL",
+        "asset_class": "stocks",
+        "timeframe": "1D",
+    }
 
 
-def test_bulk_bullish_pattern_scan_uses_ohlcv_and_never_yolov8(monkeypatch, app):
+def test_bulk_bullish_pattern_scan_uses_ohlcv_and_never_yolov8(monkeypatch, app, fake_provider):
     from backend.services.patternDetection import yoloService
 
-    monkeypatch.setattr(scans, "polygon", StaticBarsPolygonClient(_bars_with_bullish_engulfing()))
+    fake_provider.default_bars = _bars_with_bullish_engulfing()
     monkeypatch.setattr(scans, "ALL_STOCK_SYMBOLS", ["AAPL"])
     monkeypatch.setattr(yoloService, "detect_patterns", lambda *_args, **_kwargs: pytest.fail("YOLOv8 should not run in bulk scans"))
 
@@ -106,8 +84,8 @@ def test_bulk_bullish_pattern_scan_uses_ohlcv_and_never_yolov8(monkeypatch, app)
     assert "Bullish Engulfing" in payload["results"][0]["patterns"]
 
 
-def test_bulk_pattern_scan_can_complete_with_zero_matches(monkeypatch, app):
-    monkeypatch.setattr(scans, "polygon", StaticBarsPolygonClient(_bars_without_bearish_patterns()))
+def test_bulk_pattern_scan_can_complete_with_zero_matches(monkeypatch, app, fake_provider):
+    fake_provider.default_bars = _bars_without_bearish_patterns()
     monkeypatch.setattr(scans, "ALL_STOCK_SYMBOLS", ["AAPL"])
 
     with app.app_context():
@@ -126,9 +104,15 @@ def test_bulk_pattern_scan_can_complete_with_zero_matches(monkeypatch, app):
     ("timeframe", "multiplier", "timespan"),
     [("1m", 1, "minute"), ("5m", 5, "minute")],
 )
-def test_intraday_pattern_scans_use_canonical_timeframes_without_crashing(monkeypatch, app, timeframe, multiplier, timespan):
-    polygon = RecordingBarsPolygonClient(_bars_with_bullish_engulfing())
-    monkeypatch.setattr(scans, "polygon", polygon)
+def test_intraday_pattern_scans_use_canonical_timeframes_without_crashing(
+    monkeypatch,
+    app,
+    fake_provider,
+    timeframe,
+    multiplier,
+    timespan,
+):
+    fake_provider.default_bars = _bars_with_bullish_engulfing()
     monkeypatch.setattr(scans, "ALL_STOCK_SYMBOLS", ["AAPL"])
 
     with app.app_context():
@@ -137,19 +121,20 @@ def test_intraday_pattern_scans_use_canonical_timeframes_without_crashing(monkey
     assert payload["meta"]["total_scanned"] == 1
     assert payload["meta"]["pattern_computation_errors"] == 0
     assert payload["results"][0]["matched_filters"] == ["bullish_pattern"]
-    assert polygon.calls[0]["multiplier"] == multiplier
-    assert polygon.calls[0]["timespan"] == timespan
+    request = next(call["request"] for call in fake_provider.calls if call["operation"] == "get_bars")
+    assert request.timeframe.config["multiplier"] == multiplier
+    assert request.timeframe.config["timespan"] == timespan
     assert payload["meta"]["data_limit_notices"] == [
         "Historical data for this timeframe is limited to 60 bars"
     ]
 
 
-def test_scan_market_reports_analysis_failure_separately(monkeypatch):
+def test_scan_market_reports_analysis_failure_separately(monkeypatch, fake_provider):
     class BrokenAnalysis:
         def full_analysis(self, _bars):
             raise RuntimeError("pattern engine exploded")
 
-    monkeypatch.setattr(scans, "polygon", StaticBarsPolygonClient(_bars_without_bearish_patterns()))
+    fake_provider.default_bars = _bars_without_bearish_patterns()
     monkeypatch.setattr(scans, "ta", BrokenAnalysis())
     monkeypatch.setattr(scans, "ALL_STOCK_SYMBOLS", ["AAPL"])
 
@@ -161,8 +146,8 @@ def test_scan_market_reports_analysis_failure_separately(monkeypatch):
     assert exc.value.details["symbol_failures"][0]["symbol"] == "AAPL"
 
 
-def test_stock_scan_uses_database_universe_when_available(monkeypatch, app):
-    monkeypatch.setattr(scans, "polygon", StaticBarsPolygonClient(_bars_with_bullish_engulfing()))
+def test_stock_scan_uses_database_universe_when_available(app, fake_provider):
+    fake_provider.default_bars = _bars_with_bullish_engulfing()
     with app.app_context():
         db.session.add_all(
             [
@@ -177,3 +162,86 @@ def test_stock_scan_uses_database_universe_when_available(monkeypatch, app):
     assert payload["meta"]["total_symbols"] == 2
     assert payload["meta"]["total_scanned"] == 2
     assert {result["provider_symbol"] for result in payload["results"]} == {"AAA", "CCC"}
+
+
+def test_current_insufficient_only_scan_is_reported_as_provider_unavailable(monkeypatch, fake_provider):
+    fake_provider.default_bars = _short_bars()
+    monkeypatch.setattr(scans, "_stock_scan_symbols", lambda: ["AAPL", "MSFT"])
+
+    with pytest.raises(ApiError) as exc:
+        scans.scan_market("stocks", ["rsi_oversold"], "1D", 10)
+
+    assert exc.value.code == "provider_data_unavailable"
+    assert exc.value.status_code == 502
+    assert exc.value.details["attempted"] == 2
+    assert exc.value.details["no_data"] == 0
+    assert exc.value.details["insufficient_data"] == 2
+
+
+def test_scan_rejects_unknown_filter_when_one_filter_is_valid(monkeypatch, app, fake_provider):
+    fake_provider.default_bars = _bars_with_bullish_engulfing()
+    monkeypatch.setattr(scans, "_stock_scan_symbols", lambda: ["AAPL"])
+
+    with app.app_context(), pytest.raises(ApiError) as exc_info:
+        scans.scan_market("stocks", ["unknown_filter", "bullish_pattern"], "1D", 10)
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.code == "validation_error"
+    assert "unknown_filter" in exc_info.value.message
+
+
+def test_current_result_limit_stops_before_later_exchange_candidates(monkeypatch, app, fake_provider):
+    fake_provider.default_bars = _bars_with_bullish_engulfing()
+    monkeypatch.setattr(scans, "_stock_scan_symbols", lambda: ["NASDAQ_FIRST", "NYSE_NEVER_REACHED"])
+
+    with app.app_context():
+        payload = scans.scan_market("stocks", ["bullish_pattern"], "1D", 1)
+
+    assert payload["meta"]["total_symbols"] == 2
+    assert payload["meta"]["total_attempted"] == 1
+    assert [
+        call["request"].instrument.provider_symbol
+        for call in fake_provider.calls
+        if call["operation"] == "get_bars"
+    ] == ["NASDAQ_FIRST"]
+    assert [result["provider_symbol"] for result in payload["results"]] == ["NASDAQ_FIRST"]
+
+
+def test_current_scan_result_persistence_failure_is_swallowed(monkeypatch, app, fake_provider):
+    fake_provider.default_bars = _bars_with_bullish_engulfing()
+    monkeypatch.setattr(scans, "_stock_scan_symbols", lambda: ["AAPL"])
+
+    with app.app_context():
+        original_add = db.session.add
+
+        def fail_scan_result_add(instance):
+            if isinstance(instance, ScanResult):
+                raise RuntimeError("result persistence failed")
+            return original_add(instance)
+
+        monkeypatch.setattr(db.session, "add", fail_scan_result_add)
+        payload = scans.scan_market("stocks", ["bullish_pattern"], "1D", 10)
+
+        assert len(payload["results"]) == 1
+        assert ScanResult.query.count() == 0
+        assert ScanHistory.query.count() == 1
+
+
+def test_current_scan_history_persistence_failure_rolls_back_and_returns_success(monkeypatch, app, fake_provider):
+    fake_provider.default_bars = _bars_with_bullish_engulfing()
+    monkeypatch.setattr(scans, "_stock_scan_symbols", lambda: ["AAPL"])
+
+    with app.app_context():
+        original_add = db.session.add
+
+        def fail_scan_history_add(instance):
+            if isinstance(instance, ScanHistory):
+                raise RuntimeError("history persistence failed")
+            return original_add(instance)
+
+        monkeypatch.setattr(db.session, "add", fail_scan_history_add)
+        payload = scans.scan_market("stocks", ["bullish_pattern"], "1D", 10)
+
+        assert len(payload["results"]) == 1
+        assert ScanResult.query.count() == 0
+        assert ScanHistory.query.count() == 0
