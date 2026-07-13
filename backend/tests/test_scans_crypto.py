@@ -2,7 +2,7 @@ from backend.models.scan import ScanHistory, ScanResult
 from backend.services import scans
 
 
-def _bars_with_bullish_engulfing(count=60):
+def _bars_with_bullish_engulfing(count=140):
     bars = []
     for index in range(count - 2):
         base = 100 + (index * 0.1)
@@ -30,6 +30,8 @@ def test_current_crypto_scan_attempts_fixed_universe_and_persists_crypto_matches
     assert payload["meta"]["total_symbols"] == 15
     assert payload["meta"]["total_attempted"] == 15
     assert payload["meta"]["total_scanned"] == 15
+    assert payload["meta"]["universe"] == "crypto_static"
+    assert payload["meta"]["universe_source"] == "static"
     assert len(payload["results"]) == 15
     bar_calls = [call for call in fake_provider.calls if call["operation"] == "get_bars"]
     assert len(bar_calls) == 15
@@ -58,7 +60,7 @@ def test_current_crypto_intraday_scan_forwards_canonical_provider_mapping(app, f
     assert persisted_timeframes == {"1m"}
 
 
-def test_current_crypto_long_history_filter_silently_becomes_no_match_on_short_bars(app, fake_provider):
+def test_crypto_long_history_filter_reports_explicit_insufficient_data(app, fake_provider):
     fake_provider.default_bars = _short_trending_bars()
 
     with app.app_context():
@@ -66,6 +68,10 @@ def test_current_crypto_long_history_filter_silently_becomes_no_match_on_short_b
 
     assert payload["results"] == []
     assert payload["meta"]["total_attempted"] == 15
-    assert payload["meta"]["total_scanned"] == 15
-    assert payload["meta"]["insufficient_data"] == 0
+    assert payload["meta"]["total_scanned"] == 0
+    assert payload["meta"]["insufficient_data"] == 15
+    assert all(
+        item["status"] == "insufficient_data"
+        for item in payload["meta"]["symbol_outcomes"]
+    )
     assert payload["meta"]["filters_applied"] == ["ema_golden_cross"]

@@ -7,6 +7,7 @@ from backend.errors import ApiError
 from backend.market_config import TIMEFRAME_CONFIG, normalize_timeframe
 from backend.schemas.common import ApiModel
 from backend.strategy_runtime import validate_strategy_selection
+from backend.services.universe.registry import registry as universe_registry
 from backend.symbols import canonicalize_symbol
 
 VALID_MARKETS = {"stocks", "crypto"}
@@ -18,6 +19,7 @@ class ScanRequest(ApiModel):
     timeframe: str = Field(default="1D", max_length=10)
     filters: list[str] = Field(min_length=1, max_length=25)
     limit: int = Field(default=20, ge=1, le=50)
+    universe: Optional[str] = Field(default=None, max_length=64)
 
     @field_validator("market")
     @classmethod
@@ -35,8 +37,17 @@ class ScanRequest(ApiModel):
             raise ValueError("Invalid timeframe")
         return value
 
+    @field_validator("universe")
+    @classmethod
+    def normalize_universe(cls, value):
+        return value.strip() if value else None
+
     @model_validator(mode="after")
     def validate_strategies(self):
+        universe_registry.validate(
+            AssetClass.from_wire(self.market),
+            self.universe,
+        )
         validate_strategy_selection(
             self.filters,
             asset_class=AssetClass.from_wire(self.market),
@@ -51,6 +62,7 @@ class ScanTemplateCreateRequest(ApiModel):
     timeframe: str = Field(default="1D", max_length=10)
     filters: list[str] = Field(min_length=1, max_length=25)
     limit: int = Field(default=30, ge=1, le=50)
+    universe: Optional[str] = Field(default=None, max_length=64)
 
     @field_validator("name")
     @classmethod
@@ -76,8 +88,17 @@ class ScanTemplateCreateRequest(ApiModel):
             raise ValueError("Invalid timeframe")
         return value
 
+    @field_validator("universe")
+    @classmethod
+    def normalize_universe(cls, value):
+        return value.strip() if value else None
+
     @model_validator(mode="after")
     def validate_strategies(self):
+        universe_registry.validate(
+            AssetClass.from_wire(self.market),
+            self.universe,
+        )
         validate_strategy_selection(
             self.filters,
             asset_class=AssetClass.from_wire(self.market),

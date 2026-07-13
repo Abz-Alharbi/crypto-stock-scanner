@@ -135,6 +135,39 @@ class PolygonClientTests(unittest.TestCase):
         self.assertEqual(client.session.calls[0]["params"]["exchange"], "XNAS")
         self.assertEqual(client.session.calls[1]["params"], {})
 
+    def test_aggregate_pagination_fixes_original_stale_truncation_and_deduplicates(self):
+        client = PolygonClient("test-key")
+        first_page = {
+            "results": [{"t": 1, "c": 101}, {"t": 2, "c": 102}],
+            "next_url": "https://api.polygon.io/v2/aggs/ticker/AAPL/range/1/hour/next",
+        }
+        client.session = FakeSession(
+            [
+                FakeResponse(200, first_page),
+                FakeResponse(
+                    200,
+                    {"results": [{"t": 2, "c": 202}, {"t": 3, "c": 103}]},
+                ),
+            ]
+        )
+
+        # This is the pre-Phase-6 truncation: only the first page was used,
+        # ending at stale timestamp 2 even though a continuation was supplied.
+        self.assertEqual(first_page["results"][-1]["t"], 2)
+
+        result = client.get_aggregates(
+            "AAPL",
+            timespan="hour",
+            multiplier=1,
+            from_date="2026-01-01",
+            to_date="2026-07-14",
+        )
+
+        self.assertEqual(len(client.session.calls), 2)
+        self.assertEqual([bar["t"] for bar in result], [1, 2, 3])
+        self.assertEqual(result[1]["c"], 202)
+        self.assertEqual(result[-1]["t"], 3)
+
 
 if __name__ == "__main__":
     unittest.main()

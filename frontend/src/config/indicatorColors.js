@@ -1,8 +1,10 @@
 export const CHART_SEMANTIC_COLORS = {
   candleBullish: '#00d4aa',
   candleBearish: '#ef4444',
+  candlePartial: '#f59e0b',
   volumeBullish: 'rgba(0, 212, 170, 0.2)',
   volumeBearish: 'rgba(239, 68, 68, 0.2)',
+  volumePartial: 'rgba(245, 158, 11, 0.24)',
   volumeBase: '#00d4aa33',
   crosshair: 'rgba(0, 212, 170, 0.3)',
 };

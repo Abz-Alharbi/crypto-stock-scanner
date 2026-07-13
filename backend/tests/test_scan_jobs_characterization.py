@@ -4,6 +4,7 @@ import pytest
 
 from backend.errors import ApiError
 from backend.jobs import scan_jobs
+from backend.services.universe.providers import UniverseResolution
 
 
 class FakeApp:
@@ -67,7 +68,16 @@ def test_provider_failure_context_survives_scan_worker_boundary(
     monkeypatch.setattr(scan_jobs, "create_app", lambda: app)
     monkeypatch.setattr(scan_jobs, "set_scan_job_state", record_state)
     monkeypatch.setattr(scan_jobs, "is_scan_cancel_requested", lambda _job_id: False)
-    monkeypatch.setattr(scan_jobs.scans, "_stock_scan_symbols", lambda: ["AAPL"])
+    monkeypatch.setattr(
+        scan_jobs.scans,
+        "resolve_scan_universe",
+        lambda asset_class, universe_key=None: UniverseResolution(
+            universe_key or "us_stocks_top",
+            asset_class,
+            ("AAPL",),
+            "test",
+        ),
+    )
 
     with pytest.raises(ApiError) as exc:
         scan_jobs.run_scan_job("job-provider", None, "stocks", ["rsi_oversold"], "1D", 10)

@@ -1,7 +1,15 @@
-def run_scan_job(job_id, user_id, market, filters, timeframe, limit):
+def run_scan_job(job_id, user_id, market, filters, timeframe, limit, universe=None):
     from backend.jobs.scan_jobs import run_scan_job as _run_scan_job
 
-    return _run_scan_job(job_id, user_id, market, filters, timeframe, limit)
+    return _run_scan_job(
+        job_id,
+        user_id,
+        market,
+        filters,
+        timeframe,
+        limit,
+        universe=universe,
+    )
 
 
 def evaluate_scan_templates_job():

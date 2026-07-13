@@ -127,13 +127,22 @@ def enqueue_scan_job(user_id, data):
         timeframe=data.timeframe,
         filters=data.filters,
         limit=data.limit,
+        universe=data.universe,
         created_at=time.time(),
     )
 
     if os.getenv("SCAN_QUEUE_SYNC", "false").lower() == "true":
         from backend.jobs.scan_jobs import run_scan_job
 
-        run_scan_job(job_id, user_id, data.market, data.filters, data.timeframe, data.limit)
+        run_scan_job(
+            job_id,
+            user_id,
+            data.market,
+            data.filters,
+            data.timeframe,
+            data.limit,
+            universe=data.universe,
+        )
         return job_id
 
     from worker import run_scan_job
@@ -147,6 +156,7 @@ def enqueue_scan_job(user_id, data):
         data.filters,
         data.timeframe,
         data.limit,
+        universe=data.universe,
         job_id=job_id,
         job_timeout=SCAN_JOB_TIMEOUT_SECONDS,
         result_ttl=SCAN_JOB_TTL_SECONDS,

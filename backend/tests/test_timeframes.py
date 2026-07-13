@@ -42,7 +42,7 @@ def test_timeframe_map_contains_only_canonical_keys():
     assert tuple(TIMEFRAME_MAP.keys()) == EXPECTED_TIMEFRAMES
 
 
-def test_current_scan_request_silently_ignores_unknown_domain_context():
+def test_scan_request_accepts_registered_universe_and_ignores_future_context():
     request = ScanRequest.model_validate(
         {
             "market": "crypto",
@@ -51,7 +51,7 @@ def test_current_scan_request_silently_ignores_unknown_domain_context():
             "limit": 5,
             "asset_class": "crypto",
             "venue": "GLOBAL_CRYPTO",
-            "universe": "crypto_usd_top",
+            "universe": "crypto_static",
         }
     )
 
@@ -60,4 +60,27 @@ def test_current_scan_request_silently_ignores_unknown_domain_context():
         "timeframe": "1D",
         "filters": ["rsi_oversold"],
         "limit": 5,
+        "universe": "crypto_static",
     }
+
+
+def test_scan_request_rejects_unknown_or_cross_asset_universe():
+    with pytest.raises(ValidationError, match="Unknown universe"):
+        ScanRequest.model_validate(
+            {
+                "market": "crypto",
+                "timeframe": "1D",
+                "filters": ["rsi_oversold"],
+                "universe": "crypto_usd_top",
+            }
+        )
+
+    with pytest.raises(ValidationError, match="does not support crypto"):
+        ScanRequest.model_validate(
+            {
+                "market": "crypto",
+                "timeframe": "1D",
+                "filters": ["rsi_oversold"],
+                "universe": "nasdaq_top",
+            }
+        )

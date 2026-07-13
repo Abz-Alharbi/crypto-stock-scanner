@@ -51,7 +51,7 @@ class MockPolygonClient:
                 "c": 101 + index,
                 "v": 1_000_000 + index,
             }
-            for index in range(60)
+            for index in range(240)
         ]
 
     def get_ticker_details(self, symbol):
@@ -156,7 +156,7 @@ def fake_provider():
             "c": 101 + index,
             "v": 1_000_000 + index,
         }
-        for index in range(60)
+        for index in range(240)
     ]
     provider = FakeProvider(default_bars=bars)
     provider.search_results.update(

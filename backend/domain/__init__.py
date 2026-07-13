@@ -6,15 +6,19 @@ persistence boundaries continue to use their current wire representations.
 
 from backend.domain.asset import AssetClass
 from backend.domain.instrument import Instrument
+from backend.domain.market_calendar import closed_bars, lookback_for, normalize_bars
 from backend.domain.requests import MarketDataRequest, ScanContext, ScanScope
 from backend.domain.timeframes import Timeframe, parse_timeframe
 
 __all__ = [
     "AssetClass",
     "Instrument",
+    "closed_bars",
+    "lookback_for",
     "MarketDataRequest",
     "ScanContext",
     "ScanScope",
     "Timeframe",
+    "normalize_bars",
     "parse_timeframe",
 ]

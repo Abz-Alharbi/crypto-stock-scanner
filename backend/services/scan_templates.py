@@ -37,6 +37,8 @@ def create_template(user, data):
         "filters": data.filters,
         "limit": data.limit,
     }
+    if data.universe is not None:
+        criteria["universe"] = data.universe
     template = ScanTemplate(
         user_id=user.id,
         name=data.name,
@@ -58,13 +60,18 @@ def delete_template(user, template_id):
 
 def evaluate_template(template):
     criteria = template.criteria()
+    scan_kwargs = {
+        "user_id": template.user_id,
+        "job_id": f"template-{template.id}-{int(time.time())}",
+    }
+    if criteria.get("universe") is not None:
+        scan_kwargs["universe_key"] = criteria["universe"]
     payload = scans.scan_market(
         criteria.get("market", "stocks"),
         criteria.get("filters", []),
         criteria.get("timeframe", "1D"),
         criteria.get("limit", 30),
-        user_id=template.user_id,
-        job_id=f"template-{template.id}-{int(time.time())}",
+        **scan_kwargs,
     )
     created = 0
     for result in payload.get("results", []):

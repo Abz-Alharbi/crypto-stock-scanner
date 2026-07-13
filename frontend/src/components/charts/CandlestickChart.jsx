@@ -14,6 +14,7 @@ import {
   computeMACD,
   computeRSI,
 } from './indicatorCalculations';
+import { toCandlestickPoint, toVolumePoint } from './chartData';
 
 const PATTERN_DISCLAIMER = 'Pattern detection is for research only and does not constitute financial advice.';
 const INDICATOR_VISIBILITY_KEY = 'marketScanner.chart.indicatorVisibility.v1';
@@ -74,23 +75,13 @@ const CandlestickChart = memo(function CandlestickChart({
   const chartData = useMemo(() => {
     if (!data || data.length === 0) return [];
 
-    return data.map(bar => ({
-      time: Math.floor(bar.t / 1000),
-      open: bar.o,
-      high: bar.h,
-      low: bar.l,
-      close: bar.c,
-    })).sort((a, b) => a.time - b.time);
+    return data.map(toCandlestickPoint).sort((a, b) => a.time - b.time);
   }, [data]);
 
   const volumeData = useMemo(() => {
     if (!data || data.length === 0) return [];
 
-    return data.map(bar => ({
-      time: Math.floor(bar.t / 1000),
-      value: bar.v || 0,
-      color: bar.c >= bar.o ? CHART_SEMANTIC_COLORS.volumeBullish : CHART_SEMANTIC_COLORS.volumeBearish,
-    })).sort((a, b) => a.time - b.time);
+    return data.map(toVolumePoint).sort((a, b) => a.time - b.time);
   }, [data]);
 
   const hasData = chartData.length > 0;
@@ -98,14 +89,18 @@ const CandlestickChart = memo(function CandlestickChart({
   const showBollingerBands = Boolean(indicators?.bollinger_bands?.upper);
   const showMacd = Boolean(indicators?.macd);
   const showRsi = isFiniteNumber(indicators?.rsi);
+  const closedChartData = useMemo(
+    () => chartData.filter(point => !point.partial),
+    [chartData]
+  );
   const indicatorDefinitions = useMemo(() => (
-    buildIndicatorDefinitions(chartData, {
+    buildIndicatorDefinitions(closedChartData, {
       showBollingerBands,
       showEma,
       showMacd,
       showRsi,
     })
-  ), [chartData, showBollingerBands, showEma, showMacd, showRsi]);
+  ), [closedChartData, showBollingerBands, showEma, showMacd, showRsi]);
   const hasOscillatorSeries = indicatorDefinitions.series.some(
     definition => definition.priceScaleId === 'macd' || definition.priceScaleId === 'rsi'
   );

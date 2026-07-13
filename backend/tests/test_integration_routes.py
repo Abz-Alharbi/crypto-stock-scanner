@@ -1,3 +1,5 @@
+import pytest
+
 from backend.extensions import db
 from backend.models.scan import ScanHistory
 from backend.models.user import User
@@ -138,7 +140,8 @@ def test_search_route_uses_mocked_polygon_client(client):
     assert results[0]["name"] == "Apple Inc."
 
 
-def test_scan_route_completes_with_mocked_polygon_data(client, monkeypatch):
+@pytest.mark.parametrize("universe", ["nasdaq_top", "nyse_top"])
+def test_scan_route_completes_with_mocked_polygon_data(client, monkeypatch, universe):
     from backend.services import scan_jobs
 
     state_store = {}
@@ -165,7 +168,13 @@ def test_scan_route_completes_with_mocked_polygon_data(client, monkeypatch):
 
     scan_response = client.post(
         "/api/scan",
-        json={"market": "stocks", "timeframe": "1D", "filters": ["macd_bullish"], "limit": 3},
+        json={
+            "market": "stocks",
+            "timeframe": "1D",
+            "filters": ["ema_golden_cross"],
+            "limit": 3,
+            "universe": universe,
+        },
         headers=headers,
     )
 
@@ -177,4 +186,35 @@ def test_scan_route_completes_with_mocked_polygon_data(client, monkeypatch):
     payload = status_response.get_json()
     assert payload["status"] == "completed"
     assert payload["results"]
+    assert set(payload["results"][0]) == {
+        "symbol",
+        "raw_symbol",
+        "provider_symbol",
+        "display_symbol",
+        "market",
+        "canonical_symbol",
+        "price",
+        "matched_filters",
+        "match_count",
+        "total_filters",
+        "match_pct",
+        "overall_signal",
+        "rsi",
+        "macd",
+        "patterns",
+        "trade_setup",
+    }
     assert payload["meta"]["total_scanned"] >= 1
+    assert payload["meta"]["symbol_outcomes"]
+    assert all(
+        outcome["status"] in {"matched", "not_matched"}
+        for outcome in payload["meta"]["symbol_outcomes"]
+    )
+    assert payload["meta"]["universe"] == universe
+    assert {
+        "required_bars",
+        "insufficient_data_symbols",
+        "symbol_outcomes",
+        "provider_failures",
+        "persistence_failures",
+    } <= set(payload["meta"])

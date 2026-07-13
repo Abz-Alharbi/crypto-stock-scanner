@@ -714,14 +714,15 @@ class TechnicalAnalysis:
         return patterns
 
     @staticmethod
-    def full_analysis(bars, features=None):
+    def full_analysis(bars, features=None, timeframe=None):
         """Run technical analysis, optionally limited to named feature families.
 
         ``features=None`` preserves the historical complete response. A selected
         feature set is used by registry-driven scans before a matching result
         needs the complete legacy response payload.
         """
-        if not bars or len(bars) < 30:
+        bars = [bar for bar in bars or [] if not bar.get('partial', False)]
+        if len(bars) < 2:
             return None
 
         all_features = {
@@ -783,8 +784,15 @@ class TechnicalAnalysis:
             TechnicalAnalysis.detect_candlestick_patterns(opens, highs, lows, closes)
             if 'candlestick_patterns' in computed else []
         )
+        pattern_window = 60
+        if timeframe:
+            from backend.market_config import timeframe_config
+
+            pattern_window = int(
+                (timeframe_config(timeframe) or {}).get('pattern_window', 60)
+            )
         chart_patterns = (
-            TechnicalAnalysis.detect_chart_patterns(closes)
+            TechnicalAnalysis.detect_chart_patterns(closes, window=pattern_window)
             if 'chart_patterns' in computed else []
         )
 

@@ -19,6 +19,7 @@ from backend.strategies import (
 )
 from backend.strategies.capabilities import get_plan_capabilities
 from backend.strategy_runtime import get_strategies, validate_strategy_selection
+from backend.services.universe.providers import UniverseResolution
 
 LEGACY_IDS = {
     "rsi_oversold",
@@ -325,9 +326,18 @@ def test_demo_registration_requires_no_strategy_specific_scan_branch(
             "c": 129 - index,
             "v": 1000,
         }
-        for index in range(30)
+            for index in range(140)
     ]
-    monkeypatch.setattr(scans, "_stock_scan_symbols", lambda: ["AAPL"])
+    monkeypatch.setattr(
+        scans,
+        "resolve_scan_universe",
+        lambda asset_class, universe_key=None: UniverseResolution(
+            universe_key or "us_stocks_top",
+            asset_class,
+            ("AAPL",),
+            "test",
+        ),
+    )
     registry.register(probe)
     try:
         with app.app_context():

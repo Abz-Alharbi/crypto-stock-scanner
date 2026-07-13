@@ -7,22 +7,40 @@ from datetime import datetime, timedelta
 
 from flask import current_app, has_app_context
 from sqlalchemy import func
-from sqlalchemy.exc import SQLAlchemyError
 
 from backend.domain import AssetClass
 from backend.extensions import db
 from backend.models.universe import UniverseSymbol
 from backend.providers import get_provider
 from backend.services.redis_store import get_redis_client
+from backend.services.redis_store import redis_get_json, redis_set_json
 from backend.services.scan_jobs import SCAN_JOB_TIMEOUT_SECONDS, get_scan_queue
+from backend.services.universe.registry import registry
 
 logger = logging.getLogger(__name__)
 
 SCHEDULE_MARKER_KEY = "universe:refresh_scheduled"
+BUILD_STATUS_KEY = "universe:last_build_status"
 EXCHANGE_CONFIG = {
     "NASDAQ": {"polygon_exchange": "XNAS", "target_config": "UNIVERSE_NASDAQ_SIZE"},
     "NYSE": {"polygon_exchange": "XNYS", "target_config": "UNIVERSE_NYSE_SIZE"},
 }
+_last_build_status = None
+
+
+class UniverseCandidateError(ValueError):
+    """Raised before persistence when a rebuild candidate is unsafe."""
+
+
+def _set_build_status(**status):
+    global _last_build_status
+    _last_build_status = {**status, "recorded_at": datetime.utcnow().isoformat()}
+    redis_set_json(BUILD_STATUS_KEY, _last_build_status)
+    return _last_build_status
+
+
+def _get_build_status():
+    return redis_get_json(BUILD_STATUS_KEY) or _last_build_status
 
 
 def _config_value(name, default):
@@ -171,6 +189,11 @@ def rank_symbols(eligible_symbols, volume_sum, volume_count, computed_at):
             ranked_records.append(
                 UniverseSymbol(
                     symbol=symbol,
+                    asset_class="equity",
+                    venue=config["polygon_exchange"],
+                    universe_key=(
+                        "nasdaq_top" if exchange == "NASDAQ" else "nyse_top"
+                    ),
                     exchange=exchange,
                     avg_daily_volume=avg_volume,
                     rank=rank,
@@ -180,7 +203,58 @@ def rank_symbols(eligible_symbols, volume_sum, volume_count, computed_at):
     return ranked_records, final_counts
 
 
-def save_universe(records):
+def validate_candidate(
+    records,
+    final_counts,
+    computed_at,
+    *,
+    processed_days=None,
+):
+    if not records:
+        raise UniverseCandidateError("candidate universe is empty")
+    if processed_days is not None and processed_days <= 0:
+        raise UniverseCandidateError("candidate has no successfully processed market days")
+
+    for exchange, config in EXCHANGE_CONFIG.items():
+        expected = _int_config(
+            config["target_config"], 500 if exchange == "NASDAQ" else 300
+        )
+        actual = int(final_counts.get(exchange, 0))
+        if actual < expected:
+            raise UniverseCandidateError(
+                f"candidate {exchange} count {actual} is below required {expected}"
+            )
+
+    max_age = _int_config("UNIVERSE_MAX_CANDIDATE_AGE_SECONDS", 3600)
+    age = max(0.0, (datetime.utcnow() - computed_at).total_seconds())
+    if age > max_age:
+        raise UniverseCandidateError(
+            f"candidate is stale ({round(age)}s old; maximum {max_age}s)"
+        )
+
+
+def save_universe(
+    records,
+    *,
+    final_counts=None,
+    computed_at=None,
+    processed_days=None,
+):
+    records = list(records)
+    computed_at = computed_at or (
+        max((record.computed_at for record in records), default=datetime.utcnow())
+    )
+    if final_counts is None:
+        final_counts = {
+            exchange: sum(record.exchange == exchange for record in records)
+            for exchange in EXCHANGE_CONFIG
+        }
+    validate_candidate(
+        records,
+        final_counts,
+        computed_at,
+        processed_days=processed_days,
+    )
     try:
         UniverseSymbol.query.delete()
         db.session.bulk_save_objects(records)
@@ -194,14 +268,27 @@ def build_and_save_universe():
     started = time.time()
     lookback_days = _int_config("UNIVERSE_LOOKBACK_DAYS", 730)
     computed_at = datetime.utcnow()
-    provider = get_provider()
-    eligible_symbols, reference_counts = fetch_eligible_symbols(provider)
-    volume_sum, volume_count, processed_days, skipped_days = build_volume_history(
-        eligible_symbols,
-        lookback_days,
-        provider,
-    )
-    records, final_counts = rank_symbols(eligible_symbols, volume_sum, volume_count, computed_at)
+    market_data_provider = get_provider()
+    universe_provider = registry.get("us_stocks_top")
+    try:
+        candidate = universe_provider.build_candidate(
+            market_data_provider,
+            lookback_days,
+            computed_at,
+        )
+        records = candidate["records"]
+        reference_counts = candidate["reference_counts"]
+        processed_days = candidate["processed_days"]
+        skipped_days = candidate["skipped_days"]
+        final_counts = candidate["final_counts"]
+    except Exception as exc:
+        _set_build_status(
+            status="failed",
+            degraded=True,
+            degraded_reason=f"{type(exc).__name__}: {exc}",
+            retained_previous=True,
+        )
+        raise
 
     logger.info(
         "universe_rebuild_verification",
@@ -214,8 +301,7 @@ def build_and_save_universe():
             "lookback_days": lookback_days,
         },
     )
-    save_universe(records)
-    return {
+    payload = {
         "reference_counts": reference_counts,
         "processed_days": processed_days,
         "skipped_days": skipped_days,
@@ -224,29 +310,52 @@ def build_and_save_universe():
         "computed_at": computed_at.isoformat(),
         "duration_seconds": round(time.time() - started, 2),
     }
+    try:
+        save_universe(
+            records,
+            final_counts=final_counts,
+            computed_at=computed_at,
+            processed_days=processed_days,
+        )
+    except UniverseCandidateError as exc:
+        logger.error(
+            "universe_candidate_rejected_retaining_previous",
+            extra={"reason": str(exc), **payload},
+        )
+        payload.update(
+            {
+                "status": "degraded",
+                "degraded": True,
+                "degraded_reason": str(exc),
+                "retained_previous": True,
+                "stored_symbols": UniverseSymbol.query.count(),
+            }
+        )
+        _set_build_status(**payload)
+        return payload
+
+    payload.update(
+        {
+            "status": "healthy",
+            "degraded": False,
+            "degraded_reason": None,
+            "retained_previous": False,
+        }
+    )
+    _set_build_status(**payload)
+    return payload
 
 
 def get_scan_universe_symbols(fallback_symbols):
-    try:
-        rows = (
-            UniverseSymbol.query.order_by(UniverseSymbol.exchange.asc(), UniverseSymbol.rank.asc())
-            .all()
-        )
-    except RuntimeError:
-        logger.warning("universe_lookup_without_app_context")
-        return list(fallback_symbols)
-    except SQLAlchemyError as exc:
-        db.session.rollback()
-        logger.warning(
-            "universe_lookup_failed_using_fallback",
-            extra={"error": str(exc), "fallback_count": len(fallback_symbols)},
-        )
-        return list(fallback_symbols)
+    from backend.services.universe.registry import registry
 
-    if not rows:
-        logger.warning("universe_symbols_empty_using_fallback", extra={"fallback_count": len(fallback_symbols)})
-        return list(fallback_symbols)
-    return [row.symbol for row in rows]
+    return list(
+        registry.resolve(
+            AssetClass.EQUITY,
+            "us_stocks_top",
+            fallback_symbols=fallback_symbols,
+        ).symbols
+    )
 
 
 def status_payload():
@@ -254,11 +363,40 @@ def status_payload():
     nasdaq_count = UniverseSymbol.query.filter_by(exchange="NASDAQ").count()
     nyse_count = UniverseSymbol.query.filter_by(exchange="NYSE").count()
     last_computed_at = db.session.query(func.max(UniverseSymbol.computed_at)).scalar()
+    from backend.services.universe.registry import (
+        fallback_for_universe,
+        registry,
+    )
+
+    universes = {}
+    for provider in registry.all():
+        resolution = registry.resolve(
+            provider.asset_class,
+            provider.universe_key,
+            fallback_symbols=fallback_for_universe(provider.universe_key),
+        )
+        universes[provider.universe_key] = {
+            "key": provider.universe_key,
+            "name": provider.display_name,
+            "asset_class": provider.asset_class.value,
+            "count": len(resolution.symbols),
+            "source": resolution.source,
+            "degraded": resolution.degraded,
+            "degraded_reason": resolution.degraded_reason,
+            "last_computed_at": (
+                resolution.computed_at.isoformat()
+                if resolution.computed_at
+                else None
+            ),
+        }
+
     return {
         "total_symbols": total,
         "nasdaq_count": nasdaq_count,
         "nyse_count": nyse_count,
         "last_computed_at": last_computed_at.isoformat() if last_computed_at else None,
+        "universes": universes,
+        "last_build": _get_build_status(),
     }
 
 

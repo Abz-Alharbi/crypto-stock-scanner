@@ -216,10 +216,34 @@ class PolygonClient:
             return []
 
         endpoint = f"/v2/aggs/ticker/{ticker}/range/{multiplier}/{timespan}/{from_date}/{to_date}"
-        data = self._request(endpoint, {"adjusted": "true", "sort": "asc", "limit": 50000})
-        if data and data.get("results"):
-            return data["results"]
-        return []
+        params = {"adjusted": "true", "sort": "asc", "limit": 50000}
+        next_url = endpoint
+        pages_seen = set()
+        bars_by_timestamp = {}
+        bars_without_timestamp = []
+        while next_url:
+            if next_url in pages_seen:
+                self._set_error(
+                    "pagination_loop",
+                    "Polygon aggregates returned a repeated next_url",
+                    endpoint=endpoint,
+                )
+                return []
+            pages_seen.add(next_url)
+            data = self._request(next_url, params)
+            params = None
+            if not data:
+                # Never return a successful-looking partial history when a
+                # later page failed. PolygonProvider will raise the typed error.
+                return []
+            for bar in data.get("results") or []:
+                if "t" in bar:
+                    bars_by_timestamp[bar["t"]] = bar
+                else:
+                    bars_without_timestamp.append(bar)
+            next_url = data.get("next_url")
+
+        return [bars_by_timestamp[key] for key in sorted(bars_by_timestamp)] + bars_without_timestamp
 
     def debug_aggregates_raw(self, ticker, from_date, to_date, timespan="day", multiplier=1):
         if not self.api_key:

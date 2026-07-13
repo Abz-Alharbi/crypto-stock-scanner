@@ -1,5 +1,7 @@
 import logging
 
+from flask import current_app, has_app_context
+
 from backend.factory import create_app
 from backend.errors import ApiError
 from backend.services import scans
@@ -16,8 +18,10 @@ class ScanCancelled(Exception):
     pass
 
 
-def run_scan_job(job_id, user_id, market, filters, timeframe, limit):
-    app = create_app()
+def run_scan_job(job_id, user_id, market, filters, timeframe, limit, universe=None):
+    # Synchronous development/test execution already has the configured web
+    # application and database context. RQ workers create their own app.
+    app = current_app._get_current_object() if has_app_context() else create_app()
 
     def progress_callback(update):
         if is_scan_cancel_requested(job_id):
@@ -35,6 +39,7 @@ def run_scan_job(job_id, user_id, market, filters, timeframe, limit):
                 user_id=user_id,
                 job_id=job_id,
                 progress_callback=progress_callback,
+                universe_key=universe,
             )
         state = set_scan_job_state(
             job_id,

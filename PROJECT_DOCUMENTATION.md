@@ -75,7 +75,7 @@ Current backend blueprints:
 
 Bulk scans are asynchronous:
 
-1. Frontend posts to `POST /api/scan` with `{ market, timeframe, filters, limit }`.
+1. Frontend posts to `POST /api/scan` with `{ market, timeframe, filters, limit }`; the backend also accepts an optional registered `universe` key.
 2. `backend/api/scan_routes.py` validates with `ScanRequest`.
 3. `backend/services/scan_jobs.py` creates a UUID job id and writes queued state to Redis.
 4. Unless `SCAN_QUEUE_SYNC=true`, the request enqueues `worker.run_scan_job` into the RQ queue.
@@ -85,6 +85,11 @@ Bulk scans are asynchronous:
 8. `DELETE /api/scan/<job_id>` marks a Redis cancel key and cancels the RQ job where possible.
 9. `GET /api/scan/stream/<job_id>` streams status through server-sent events.
 10. Completed matches are stored in `scan_results`; each scan writes a `scan_history` row.
+
+Completed job metadata also contains additive `symbol_outcomes` for every attempted
+symbol, including per-strategy status, obtained/required closed-bar counts, and
+typed error evidence. `insufficient_data_symbols` is separate from provider and
+persistence failures. Legacy matched `results` remain unchanged.
 
 Redis keys used by scans include:
 
@@ -121,6 +126,9 @@ Transport behavior:
 - Controlled concurrency uses a semaphore, default `POLYGON_MAX_CONCURRENT_REQUESTS=10`.
 - There is no free-tier artificial serial delay in the current client.
 - Cache reads/writes go through `backend/services/cache.py`.
+- Aggregate history follows every `next_url`, merges duplicate timestamps, and
+  returns bars chronologically. A failed continuation invalidates the partial
+  history instead of presenting truncated data as successful.
 - `POLYGON_DEBUG=true` enables more verbose provider diagnostics.
 
 News also has optional sources:
@@ -139,6 +147,7 @@ Configuration defaults:
 - `UNIVERSE_NASDAQ_SIZE=500`
 - `UNIVERSE_NYSE_SIZE=300`
 - `UNIVERSE_LOOKBACK_DAYS=730`
+- `UNIVERSE_MAX_CANDIDATE_AGE_SECONDS=3600`
 - `UNIVERSE_REFRESH_CRON=weekly`
 
 Build process:
@@ -160,6 +169,7 @@ Build process:
 4. Save:
    - `UniverseSymbol.query.delete()` plus `bulk_save_objects(records)` runs inside one DB transaction.
    - If the transaction fails, the session rolls back.
+   - Empty, undersized, stale, or zero-coverage candidates are rejected before deletion, retain the last-known-good rows, and publish a degraded reason.
    - This is transactional delete/insert, not a separate batch table swap.
 
 Operational hooks:
@@ -168,7 +178,7 @@ Operational hooks:
 - API: `GET /api/universe/status`
 - Scheduler: `ENABLE_UNIVERSE_REFRESH_SCHEDULER=true` schedules rebuild jobs through RQ.
 
-If `universe_symbols` is empty or unavailable, scanner falls back to the previous fixed stock universe and logs a warning. It does not silently scan zero symbols.
+Registered universe keys are `us_stocks_top` (default equity), `nasdaq_top`, `nyse_top`, and `crypto_static` (default crypto). If a stored equity universe is empty or unavailable, the matching legacy symbol set is used with explicit degraded metadata. Crypto's 15-pair compatibility list is exposed through the static provider instead of a scan-orchestration branch.
 
 ## Scan System
 
@@ -179,10 +189,14 @@ Markets:
 - `stocks`
 - `crypto`
 
-Fallback symbol lists:
+Registered scan universes:
 
-- Stocks: 80 symbols split as 50 NASDAQ + 30 NYSE in code.
-- Crypto: 15 provider symbols, preserving `X:` where needed.
+- `us_stocks_top`: merged top-volume equity universe, with the legacy 80-symbol list as fallback.
+- `nasdaq_top`: NASDAQ-only top-volume universe, with its 50-symbol fallback.
+- `nyse_top`: NYSE-only top-volume universe, with its 30-symbol fallback.
+- `crypto_static`: 15 provider symbols, preserving `X:` where needed.
+
+The scan evaluates the complete selected universe, ranks matches globally and deterministically, and applies `limit` afterward. This prevents the old NASDAQ-first early exit from skipping NYSE candidates.
 - Stocks use `universe_symbols` first when the dynamic universe has rows.
 
 Available scan filter categories:
@@ -214,7 +228,23 @@ The scanner computes:
 - Chart patterns: Double Bottom, Double Top, Ascending Triangle, Descending Triangle, Bullish Flag.
 - Trade setup: direction, action, confidence, entry, stop, targets, risk/reward, key supports/resistances.
 
-The scanner requires at least 30 bars per symbol for full analysis. Timeframe fetch windows are defined in the canonical timeframe config and are longer for higher-level and pattern-sensitive data.
+Required closed history is the maximum of the timeframe `min_bars` value and all
+selected strategies' `required_history`. Fetches add a 10% safety margin with at
+least five extra bars. The configured `days` value is a hard maximum lookback;
+short provider history produces explicit `insufficient_data` rather than running
+indicators on an undersized series.
+
+Equities use venue-specific XNAS/XNYS exchange calendars in
+`America/New_York`, including holidays, DST, and early closes. Only native bars
+whose start belongs to the regular 09:30–16:00 session are eligible for strategy
+evaluation. Crypto uses continuous UTC sessions with daily boundaries at 00:00,
+Monday-start weeks, and UTC calendar months/years. Native intervals are not
+resampled.
+
+The newest candle is labeled `partial` until its fixed interval or calendar/session
+boundary closes. Partial bars remain in chart payloads and are drawn in a distinct
+warning color, but backend indicators, strategies, and pattern windows exclude
+them.
 
 ## Canonical Timeframes
 
@@ -222,21 +252,21 @@ The scanner requires at least 30 bars per symbol for full analysis. Timeframe fe
 
 `/api/filters` returns these timeframes to the frontend; the scan filter panel and chart modal read from that API response rather than keeping a separate hardcoded list.
 
-| Timeframe | Polygon multiplier | Polygon timespan | Category |
-|---|---:|---|---|
-| `1m` | 1 | minute | intraday |
-| `5m` | 5 | minute | intraday |
-| `15m` | 15 | minute | intraday |
-| `30m` | 30 | minute | intraday |
-| `45m` | 45 | minute | intraday |
-| `1H` | 1 | hour | intraday |
-| `4H` | 4 | hour | intraday |
-| `1D` | 1 | day | higher |
-| `1W` | 1 | week | higher |
-| `1M` | 1 | month | higher |
-| `1Y` | 1 | year | higher |
+| Timeframe | Multiplier/timespan | Days cap | Minimum bars | Pattern window |
+|---|---|---:|---:|---:|
+| `1m` | 1 minute | 5 | 120 | 120 |
+| `5m` | 5 minute | 10 | 120 | 120 |
+| `15m` | 15 minute | 21 | 120 | 120 |
+| `30m` | 30 minute | 45 | 120 | 60 |
+| `45m` | 45 minute | 60 | 120 | 60 |
+| `1H` | 1 hour | 90 | 120 | 60 |
+| `4H` | 4 hour | 240 | 120 | 60 |
+| `1D` | 1 day | 730 | 120 | 60 |
+| `1W` | 1 week | 1,825 | 120 | 52 |
+| `1M` | 1 month | 3,650 | 120 | 36 |
+| `1Y` | 1 year | 12,775 | 5 | 5 |
 
-Each internal config includes `days`, `min_bars`, `label`, and `short_label`. The public `/api/filters` timeframe payload exports `label`, `short_label`, `multiplier`, `timespan`, `category`, and the config-driven `available` capability flag; it intentionally does not expose internal lookback fields such as `days` or `min_bars`. The same response now publishes each registered strategy's version, parameter schema, required history and indicators, supported asset classes/timeframes, and availability.
+Each internal config includes `days`, `min_bars`, `pattern_window`, `label`, and `short_label`. The public `/api/filters` timeframe payload exports `label`, `short_label`, `multiplier`, `timespan`, `category`, and the config-driven `available` capability flag; it intentionally does not expose internal lookback fields. The same response now publishes each registered strategy's version, parameter schema, required history and indicators, supported asset classes/timeframes, and availability. The current provider plan returns only five complete native annual AAPL bars; strategies requiring longer annual history therefore report insufficiency. Pattern types requiring 20–30 observations are not silently evaluated on the five-bar `1Y` window.
 
 ## Pattern Detection
 
@@ -435,7 +465,7 @@ SQLAlchemy models:
 | `ScanHistory` | `scan_history` | One row per completed scan with market, timeframe, totals, filters, duration, job id. |
 | `ScanTemplate` | `scan_templates` | User-owned named scan criteria JSON. |
 | `Notification` | `notifications` | In-app notifications with JSON payload, read state, and dedupe key. |
-| `UniverseSymbol` | `universe_symbols` | Dynamic scan universe with `symbol`, `exchange`, `avg_daily_volume`, `rank`, `computed_at`; exchange/rank uniqueness. |
+| `UniverseSymbol` | `universe_symbols` | Dynamic universe membership with asset class, venue, quote currency, universe key, legacy exchange, volume metric, rank, and computation time; rank is unique per universe key. |
 | `AdminAuditLog` | `admin_audit_logs` | Admin action trail. |
 
 Alembic migrations live under `migrations/versions/`. Flask-Migrate is initialized in the factory through `migrate.init_app(app, db)`.
@@ -444,7 +474,7 @@ Important constraints:
 
 - Watchlist unique index on `(user_id, symbol)`.
 - Enum/check constraints for role, plan, market, and timeframe values.
-- `universe_symbols` constrains exchange to NASDAQ/NYSE and rank uniqueness per exchange.
+- `universe_symbols` constrains `asset_class` to equity/crypto and rank uniqueness to `(universe_key, rank)`; legacy `exchange` remains nullable for compatibility.
 
 ## Environment Variables
 
@@ -490,6 +520,7 @@ Backend:
 | `UNIVERSE_NASDAQ_SIZE` | `500` | NASDAQ universe count. |
 | `UNIVERSE_NYSE_SIZE` | `300` | NYSE universe count. |
 | `UNIVERSE_LOOKBACK_DAYS` | `730` | Universe volume lookback. |
+| `UNIVERSE_MAX_CANDIDATE_AGE_SECONDS` | `3600` | Reject rebuild candidates older than this before replacing last-known-good rows. |
 | `UNIVERSE_REFRESH_CRON` | `weekly` | Universe rebuild schedule. Supports `weekly`, `daily`, `hourly`, or seconds. |
 | `ENABLE_UNIVERSE_REFRESH_SCHEDULER` | `false` | Schedule universe rebuilds through RQ. |
 | `FINNHUB_API_KEY` | empty | Optional news source. |
