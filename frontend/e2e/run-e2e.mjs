@@ -1,7 +1,8 @@
 import { spawn } from 'node:child_process'
 
 const cwd = process.cwd()
-const serverUrl = 'http://127.0.0.1:5173'
+const serverPort = Number(process.env.E2E_PORT || 41739)
+const serverUrl = `http://127.0.0.1:${serverPort}`
 
 async function isServerReady() {
   try {
@@ -38,17 +39,20 @@ function run(command, args, options = {}) {
 async function main() {
   let vite = null
 
-  if (!(await isServerReady())) {
-    vite = spawn(
-      process.execPath,
-      ['./node_modules/vite/bin/vite.js', '--host', '127.0.0.1'],
-      {
-        cwd,
-        stdio: ['ignore', 'ignore', 'inherit'],
-      },
-    )
-    await waitForServer(vite)
-  }
+  vite = spawn(
+    process.execPath,
+    [
+      './node_modules/vite/bin/vite.js',
+      '--host', '127.0.0.1',
+      '--port', String(serverPort),
+      '--strictPort',
+    ],
+    {
+      cwd,
+      stdio: ['ignore', 'ignore', 'inherit'],
+    },
+  )
+  await waitForServer(vite)
 
   const forwardedArgs = process.argv.slice(2)
   const hasReporter = forwardedArgs.some((arg) => arg === '--reporter' || arg.startsWith('--reporter='))
@@ -56,7 +60,9 @@ async function main() {
   if (!hasReporter) args.push('--reporter=line')
   args.push(...forwardedArgs)
 
-  const exitCode = await run(process.execPath, args)
+  const exitCode = await run(process.execPath, args, {
+    env: { ...process.env, E2E_BASE_URL: serverUrl },
+  })
 
   if (vite) {
     vite.kill()
@@ -70,4 +76,3 @@ main().catch((error) => {
   console.error(error)
   process.exit(1)
 })
-

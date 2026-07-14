@@ -8,13 +8,7 @@ import {
   PATTERN_OVERLAY_COLORS,
 } from '../../config/indicatorColors';
 import { patternAPI } from '../../services/api';
-import {
-  computeBollingerBands,
-  computeEMA,
-  computeMACD,
-  computeRSI,
-} from './indicatorCalculations';
-import { toCandlestickPoint, toVolumePoint } from './chartData';
+import { toAuthoritativeIndicatorPoints, toCandlestickPoint, toVolumePoint } from './chartData';
 
 const PATTERN_DISCLAIMER = 'Pattern detection is for research only and does not constitute financial advice.';
 const INDICATOR_VISIBILITY_KEY = 'marketScanner.chart.indicatorVisibility.v1';
@@ -50,6 +44,7 @@ const CandlestickChart = memo(function CandlestickChart({
   data,
   height = 400,
   indicators = {},
+  featureSeries,
   symbol,
   timeframe,
   canDetectPatterns = true,
@@ -99,8 +94,8 @@ const CandlestickChart = memo(function CandlestickChart({
       showEma,
       showMacd,
       showRsi,
-    })
-  ), [closedChartData, showBollingerBands, showEma, showMacd, showRsi]);
+    }, featureSeries)
+  ), [closedChartData, featureSeries, showBollingerBands, showEma, showMacd, showRsi]);
   const hasOscillatorSeries = indicatorDefinitions.series.some(
     definition => definition.priceScaleId === 'macd' || definition.priceScaleId === 'rsi'
   );
@@ -508,26 +503,25 @@ function formatConfidence(confidence) {
   return `${Math.round(percent)}%`;
 }
 
-function buildIndicatorDefinitions(chartData, visibility) {
+function buildIndicatorDefinitions(chartData, visibility, featureSeries) {
   if (!chartData.length) return { series: [], legend: [] };
 
-  const closePrices = chartData.map(point => point.close);
   const series = [];
   const legend = [];
+  const validTimes = new Set(chartData.map(point => point.time));
 
   if (visibility.showEma) {
-    EMA_SERIES.forEach(({ key, name, shortName, period, color }) => {
-      const emaData = computeEMA(closePrices, period);
+    EMA_SERIES.forEach(({ key, name, shortName, color }) => {
+      const emaData = toAuthoritativeIndicatorPoints(featureSeries?.ema?.[key], validTimes);
       if (emaData.length === 0) return;
 
-      const lineData = alignValuesToChartData(chartData, emaData);
       addLineDefinition(series, legend, {
         seriesKey: key,
         legendKey: key,
         name,
         shortName,
         color,
-        data: lineData,
+        data: emaData,
         priceScaleId: 'right',
         formatter: value => formatIndicatorValue(value, 2),
       });
@@ -535,10 +529,9 @@ function buildIndicatorDefinitions(chartData, visibility) {
   }
 
   if (visibility.showBollingerBands) {
-    const bbData = computeBollingerBands(closePrices, 20, 2);
-    if (bbData.upper.length > 0) {
-      const upperData = alignValuesToChartData(chartData, bbData.upper);
-      const lowerData = alignValuesToChartData(chartData, bbData.lower);
+    const upperData = toAuthoritativeIndicatorPoints(featureSeries?.bollinger_bands?.upper, validTimes);
+    const lowerData = toAuthoritativeIndicatorPoints(featureSeries?.bollinger_bands?.lower, validTimes);
+    if (upperData.length > 0 && lowerData.length > 0) {
       const latestUpper = lastSeriesValue(upperData);
       const latestLower = lastSeriesValue(lowerData);
       const valuesByTime = new Map();
@@ -577,11 +570,10 @@ function buildIndicatorDefinitions(chartData, visibility) {
   }
 
   if (visibility.showMacd) {
-    const macd = computeMACD(closePrices);
-    if (macd.line.length > 0) {
-      const lineData = alignValuesToChartData(chartData, macd.line);
-      const signalData = alignValuesToChartData(chartData, macd.signal);
-      const histogramData = alignValuesToChartData(chartData, macd.histogram).map(point => ({
+    const lineData = toAuthoritativeIndicatorPoints(featureSeries?.macd?.line, validTimes);
+    if (lineData.length > 0) {
+      const signalData = toAuthoritativeIndicatorPoints(featureSeries?.macd?.signal, validTimes);
+      const histogramData = toAuthoritativeIndicatorPoints(featureSeries?.macd?.histogram, validTimes).map(point => ({
         ...point,
         color: point.value >= 0
           ? INDICATOR_COLORS.macdHistogramBullish
@@ -622,7 +614,7 @@ function buildIndicatorDefinitions(chartData, visibility) {
   }
 
   if (visibility.showRsi) {
-    const rsiData = alignValuesToChartData(chartData, computeRSI(closePrices, 14));
+    const rsiData = toAuthoritativeIndicatorPoints(featureSeries?.rsi, validTimes);
     if (rsiData.length > 0) {
       addLineDefinition(series, legend, {
         seriesKey: 'rsi',
@@ -698,17 +690,6 @@ function ensureTechnicalSeries(chart, seriesMap, definition) {
 
   seriesMap.set(definition.seriesKey, nextSeries);
   return nextSeries;
-}
-
-function alignValuesToChartData(chartData, values) {
-  if (!values.length) return [];
-  const startIdx = chartData.length - values.length;
-  if (startIdx < 0) return [];
-
-  return values.map((value, idx) => ({
-    time: chartData[startIdx + idx].time,
-    value,
-  }));
 }
 
 function lastSeriesValue(data) {

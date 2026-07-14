@@ -1,6 +1,13 @@
 import { create } from 'zustand';
 import toast from 'react-hot-toast';
 import { marketAPI, notificationAPI, scanTemplateAPI, watchlistAPI } from '../services/api';
+import {
+  buildScanSubmission,
+  defaultUniverseFor,
+  flattenStrategies,
+  strategyUnavailableReason,
+  timeframeUnavailableReason,
+} from './scanContext';
 
 const MAX_SCAN_WAIT_MS = 20 * 60 * 1000;
 const MAX_QUEUED_WAIT_MS = 2 * 60 * 1000;
@@ -10,6 +17,13 @@ let searchAbortController = null;
 const useMarketStore = create((set, get) => ({
   // Market selection
   activeMarket: 'stocks', // stocks or crypto
+  activeUniverse: null,
+  universes: {},
+  planCapabilities: null,
+  marketSelections: {
+    stocks: { universe: null, timeframe: '1D', filters: [] },
+    crypto: { universe: null, timeframe: '1D', filters: [] },
+  },
 
   // Filters
   filterDefinitions: {},
@@ -22,6 +36,7 @@ const useMarketStore = create((set, get) => ({
   // Scan state
   scanResults: [],
   scanMeta: null,
+  scanContext: null,
   isScanning: false,
   scanError: null,
   scanProgress: '',
@@ -31,6 +46,8 @@ const useMarketStore = create((set, get) => ({
   selectedProviderSymbol: null,
   stockDetail: null,
   chartData: [],
+  detailTimeframe: '1D',
+  detailContext: null,
   isDetailOpen: false,
   isLoadingDetail: false,
   isLoadingChart: false,
@@ -62,31 +79,129 @@ const useMarketStore = create((set, get) => ({
 
   // ===== ACTIONS =====
 
-  setMarket: (market) => set({ activeMarket: market }),
+  setMarket: (market) => {
+    searchAbortController?.abort();
+    searchAbortController = null;
+    const state = get();
+    const currentSelections = {
+      ...state.marketSelections,
+      [state.activeMarket]: {
+        universe: state.activeUniverse,
+        timeframe: state.timeframe,
+        filters: [...state.selectedFilters],
+      },
+    };
+    const target = currentSelections[market] || {};
+    const universe = target.universe || defaultUniverseFor(state.universes, market);
+    set({
+      activeMarket: market,
+      activeUniverse: universe,
+      timeframe: target.timeframe || '1D',
+      selectedFilters: [...(target.filters || [])],
+      marketSelections: {
+        ...currentSelections,
+        [market]: { universe, timeframe: target.timeframe || '1D', filters: [...(target.filters || [])] },
+      },
+      searchResults: [],
+      isSearching: false,
+    });
+  },
+
+  setUniverse: (universe) => {
+    const state = get();
+    const definition = state.universes[universe];
+    if (!definition || definition.asset_class !== state.activeMarket) return;
+    set({
+      activeUniverse: universe,
+      marketSelections: {
+        ...state.marketSelections,
+        [state.activeMarket]: {
+          universe,
+          timeframe: state.timeframe,
+          filters: [...state.selectedFilters],
+        },
+      },
+    });
+  },
 
   setTimeframe: (tf) => {
-    const config = get().timeframes?.[tf];
-    if (config?.available === false) return;
-    set({ timeframe: tf });
+    const state = get();
+    const config = state.timeframes?.[tf];
+    const strategies = flattenStrategies(state.filterDefinitions)
+      .filter(strategy => state.selectedFilters.includes(strategy.id));
+    if (timeframeUnavailableReason(config, strategies, state.activeMarket, tf, state.planCapabilities)) return;
+    set({
+      timeframe: tf,
+      marketSelections: {
+        ...state.marketSelections,
+        [state.activeMarket]: {
+          universe: state.activeUniverse,
+          timeframe: tf,
+          filters: [...state.selectedFilters],
+        },
+      },
+    });
   },
 
   toggleFilter: (filterKey) => {
-    const current = get().selectedFilters;
-    if (current.includes(filterKey)) {
-      set({ selectedFilters: current.filter(f => f !== filterKey) });
-    } else {
-      set({ selectedFilters: [...current, filterKey] });
-    }
+    const state = get();
+    const current = state.selectedFilters;
+    const strategy = flattenStrategies(state.filterDefinitions)
+      .find(item => item.id === filterKey || item.identifier === filterKey);
+    if (!current.includes(filterKey) && strategyUnavailableReason(strategy, state.activeMarket, state.timeframe, state.planCapabilities)) return;
+    const filters = current.includes(filterKey)
+      ? current.filter(f => f !== filterKey)
+      : [...current, filterKey];
+    set({
+      selectedFilters: filters,
+      marketSelections: {
+        ...state.marketSelections,
+        [state.activeMarket]: {
+          universe: state.activeUniverse,
+          timeframe: state.timeframe,
+          filters,
+        },
+      },
+    });
   },
 
   setFiltersFromPreset: (presetKey) => {
     const preset = get().filterPresets[presetKey];
     if (preset) {
-      set({ selectedFilters: [...preset.filters] });
+      const state = get();
+      const definitions = flattenStrategies(state.filterDefinitions);
+      const filters = preset.filters.filter((filterKey) => {
+        const strategy = definitions.find(item => item.id === filterKey || item.identifier === filterKey);
+        return !strategyUnavailableReason(strategy, state.activeMarket, state.timeframe, state.planCapabilities);
+      });
+      set({
+        selectedFilters: filters,
+        marketSelections: {
+          ...state.marketSelections,
+          [state.activeMarket]: {
+            universe: state.activeUniverse,
+            timeframe: state.timeframe,
+            filters,
+          },
+        },
+      });
     }
   },
 
-  clearFilters: () => set({ selectedFilters: [] }),
+  clearFilters: () => {
+    const state = get();
+    set({
+      selectedFilters: [],
+      marketSelections: {
+        ...state.marketSelections,
+        [state.activeMarket]: {
+          universe: state.activeUniverse,
+          timeframe: state.timeframe,
+          filters: [],
+        },
+      },
+    });
+  },
 
   // Check API health
   checkConnection: async () => {
@@ -102,10 +217,22 @@ const useMarketStore = create((set, get) => ({
   loadFilters: async () => {
     try {
       const { data } = await marketAPI.getFilters();
+      const universes = data.universes || {};
+      const stockUniverse = defaultUniverseFor(universes, 'stocks');
+      const cryptoUniverse = defaultUniverseFor(universes, 'crypto');
+      const current = get();
+      const activeUniverse = current.activeUniverse || defaultUniverseFor(universes, current.activeMarket);
       set({
         filterDefinitions: data.filters,
         filterPresets: data.presets,
         timeframes: data.timeframes || {},
+        universes,
+        planCapabilities: data.plan_capabilities || null,
+        activeUniverse,
+        marketSelections: {
+          stocks: { ...current.marketSelections.stocks, universe: current.marketSelections.stocks.universe || stockUniverse },
+          crypto: { ...current.marketSelections.crypto, universe: current.marketSelections.crypto.universe || cryptoUniverse },
+        },
         filterError: null,
       });
     } catch (err) {
@@ -144,21 +271,41 @@ const useMarketStore = create((set, get) => ({
 
   // Run scan
   runScan: async () => {
-    const { selectedFilters, activeMarket, timeframe } = get();
+    const { selectedFilters, activeMarket, activeUniverse, timeframe } = get();
     if (selectedFilters.length === 0) {
       set({ scanError: 'Please select at least one filter' });
       return;
     }
+    if (!activeUniverse) {
+      set({ scanError: 'No scan universe is available for the selected asset class' });
+      return;
+    }
+    const definitions = flattenStrategies(get().filterDefinitions);
+    const unsupported = selectedFilters.find((filterKey) => {
+      const strategy = definitions.find(item => item.id === filterKey);
+      return strategyUnavailableReason(strategy, activeMarket, timeframe, get().planCapabilities);
+    });
+    if (unsupported) {
+      set({ scanError: strategyUnavailableReason(
+        definitions.find(item => item.id === unsupported),
+        activeMarket,
+        timeframe,
+        get().planCapabilities,
+      ) });
+      return;
+    }
 
-    set({ isScanning: true, scanError: null, scanProgress: 'Starting scan...', scanResults: [], scanMeta: null });
+    const { request, context } = buildScanSubmission({
+      market: activeMarket,
+      universe: activeUniverse,
+      timeframe,
+      strategyIds: selectedFilters,
+    });
+
+    set({ isScanning: true, scanError: null, scanProgress: 'Starting scan...', scanResults: [], scanMeta: null, scanContext: context });
 
     try {
-      const { data } = await marketAPI.scan({
-        market: activeMarket,
-        filters: selectedFilters,
-        timeframe: timeframe,
-        limit: 30,
-      });
+      const { data } = await marketAPI.scan(request);
       const jobId = data.job_id;
       let statusPayload = { status: 'queued', progress: 0 };
       const startedAt = Date.now();
@@ -180,7 +327,7 @@ const useMarketStore = create((set, get) => ({
         const detail = statusPayload.current_symbol ? ` - ${statusPayload.current_symbol}` : '';
         set({
           scanResults: statusPayload.results || [],
-          scanMeta: statusPayload.meta || null,
+          scanMeta: statusPayload.meta ? { ...statusPayload.meta, context } : null,
           scanProgress: `Scan ${statusPayload.status} (${statusPayload.progress || 0}%)${detail}`,
         });
       }
@@ -191,7 +338,7 @@ const useMarketStore = create((set, get) => ({
 
       set({
         scanResults: statusPayload.results || [],
-        scanMeta: statusPayload.meta || null,
+        scanMeta: statusPayload.meta ? { ...statusPayload.meta, context } : { context },
         isScanning: false,
         scanProgress: '',
       });
@@ -205,7 +352,8 @@ const useMarketStore = create((set, get) => ({
   },
 
   // Open stock detail
-  openDetail: async (symbol) => {
+  openDetail: async (symbol, context = null) => {
+    const requestedTimeframe = context?.timeframe || get().timeframe;
     set({
       selectedSymbol: symbol,
       selectedProviderSymbol: symbol,
@@ -214,11 +362,13 @@ const useMarketStore = create((set, get) => ({
       isLoadingChart: true,
       stockDetail: null,
       chartData: [],
+      detailTimeframe: requestedTimeframe,
+      detailContext: context,
       detailError: null,
     });
 
     try {
-      const { data } = await marketAPI.getStockDetail(symbol, get().timeframe);
+      const { data } = await marketAPI.getStockDetail(symbol, requestedTimeframe);
       set({
         selectedSymbol: data.display_symbol || data.symbol || symbol,
         selectedProviderSymbol: data.provider_symbol || data.raw_symbol || symbol,
@@ -233,7 +383,7 @@ const useMarketStore = create((set, get) => ({
     }
   },
 
-  closeDetail: () => set({ isDetailOpen: false, selectedSymbol: null, selectedProviderSymbol: null, stockDetail: null, chartData: [], detailError: null }),
+  closeDetail: () => set({ isDetailOpen: false, selectedSymbol: null, selectedProviderSymbol: null, stockDetail: null, chartData: [], detailContext: null, detailError: null }),
 
   // Change timeframe for detail view
   changeDetailTimeframe: async (tf) => {
@@ -242,7 +392,7 @@ const useMarketStore = create((set, get) => ({
     if (config?.available === false) return;
     const providerSymbol = selectedProviderSymbol || selectedSymbol;
     if (!providerSymbol) return;
-    set({ timeframe: tf, isLoadingChart: true });
+    set({ detailTimeframe: tf, isLoadingChart: true });
 
     try {
       const { data } = await marketAPI.getStockDetail(providerSymbol, tf);
@@ -323,7 +473,7 @@ const useMarketStore = create((set, get) => ({
   },
 
   saveScanTemplate: async (name) => {
-    const { selectedFilters, activeMarket, timeframe } = get();
+    const { selectedFilters, activeMarket, activeUniverse, timeframe } = get();
     if (selectedFilters.length === 0) {
       set({ scanTemplateError: 'Select at least one filter before saving a template' });
       return;
@@ -334,6 +484,7 @@ const useMarketStore = create((set, get) => ({
       const { data } = await scanTemplateAPI.create({
         name,
         market: activeMarket,
+        universe: activeUniverse,
         timeframe,
         filters: selectedFilters,
         limit: 30,

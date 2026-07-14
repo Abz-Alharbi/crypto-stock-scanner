@@ -178,14 +178,28 @@ def health_payload():
 
 
 def filters_payload():
+    from backend.services.universe import status_payload as universe_status_payload
+    from backend.services.universe.registry import registry as universe_registry
+
     timeframes = public_timeframes()
     plan_timeframes = strategy_runtime.available_timeframes()
     for key, value in timeframes.items():
         value["available"] = key in plan_timeframes
+    universe_status = universe_status_payload()
+    universes = {
+        key: {
+            **definition,
+            "default": key
+            == universe_registry.default_key(definition["asset_class"]),
+        }
+        for key, definition in universe_status["universes"].items()
+    }
     return {
         "filters": strategy_runtime.filters_payload(),
         "presets": strategy_runtime.FILTER_PRESETS,
         "timeframes": timeframes,
+        "universes": universes,
+        "plan_capabilities": strategy_runtime.plan_capabilities(),
     }
 
 
@@ -235,6 +249,7 @@ def stock_detail(symbol, timeframe):
         "timeframe": timeframe,
         "data_limit_notice": bars_meta.get("data_limit_notice"),
         "analysis": analysis,
+        "feature_series": ta.indicator_series(bars),
         "trade_setup": analysis.get("trade_setup"),
         "chart_data": [
             {

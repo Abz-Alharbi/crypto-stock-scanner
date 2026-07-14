@@ -9,6 +9,7 @@ export default function Header() {
   const { user, isAuthenticated, logout, setAuthModal } = useAuthStore();
   const {
     activeMarket,
+    planCapabilities,
     setMarket,
     isConnected,
     notifications,
@@ -67,10 +68,14 @@ export default function Header() {
             {['stocks', 'crypto'].map((m) => (
               <button
                 key={m}
-                onClick={() => setMarket(m)}
+                onClick={() => (!planCapabilities || planCapabilities.asset_classes?.includes(m)) && setMarket(m)}
+                disabled={Boolean(planCapabilities && !planCapabilities.asset_classes?.includes(m))}
+                title={planCapabilities && !planCapabilities.asset_classes?.includes(m) ? 'Unavailable on the current provider plan' : undefined}
                 className={`px-4 py-1.5 text-xs font-semibold uppercase tracking-wider rounded-md transition-all duration-200 ${
                   activeMarket === m
                     ? 'bg-scanner-accent text-scanner-bg shadow-lg shadow-scanner-accent/20'
+                    : planCapabilities && !planCapabilities.asset_classes?.includes(m)
+                      ? 'text-scanner-text-dim/40 cursor-not-allowed'
                     : 'text-scanner-text-dim hover:text-scanner-text'
                 }`}
               >

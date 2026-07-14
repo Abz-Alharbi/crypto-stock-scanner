@@ -2,6 +2,11 @@ import React, { useState } from 'react';
 import { AlertCircle, Filter, Zap, ChevronDown, ChevronRight, Play, RotateCcw, Save } from 'lucide-react';
 import useMarketStore from '../../store/useMarketStore';
 import useAuthStore from '../../store/useAuthStore';
+import {
+  flattenStrategies,
+  strategyUnavailableReason,
+  timeframeUnavailableReason,
+} from '../../store/scanContext';
 
 const CATEGORY_LABELS = {
   oscillators: { label: 'Oscillators', icon: '📊', color: 'text-blue-400' },
@@ -13,20 +18,29 @@ const CATEGORY_LABELS = {
 
 export default function FilterPanel() {
   const {
-    filterDefinitions, filterPresets, selectedFilters, timeframe, timeframes,
+    activeMarket, activeUniverse, universes, planCapabilities, filterDefinitions, filterPresets, selectedFilters, timeframe, timeframes,
     filterError, scanTemplateError, isSavingScanTemplate,
-    toggleFilter, setFiltersFromPreset, clearFilters, setTimeframe, runScan, saveScanTemplate, isScanning
+    setUniverse, toggleFilter, setFiltersFromPreset, clearFilters, setTimeframe, runScan, saveScanTemplate, isScanning
   } = useMarketStore();
   const { isAuthenticated, setAuthModal } = useAuthStore();
 
   const [expandedCats, setExpandedCats] = useState(new Set(['oscillators', 'moving_averages']));
   const [templateName, setTemplateName] = useState('');
-  const timeframeOptions = Object.entries(timeframes || {}).map(([key, config]) => ({
-    key,
-    label: config.label || key,
-    shortLabel: config.short_label || key,
-    available: config.available !== false,
-  }));
+  const allStrategies = flattenStrategies(filterDefinitions);
+  const selectedStrategies = allStrategies.filter(strategy => selectedFilters.includes(strategy.id));
+  const timeframeOptions = Object.entries(timeframes || {}).map(([key, config]) => {
+    const unavailableReason = timeframeUnavailableReason(config, selectedStrategies, activeMarket, key, planCapabilities);
+    return {
+      key,
+      label: config.label || key,
+      shortLabel: config.short_label || key,
+      unavailableReason,
+      available: !unavailableReason,
+    };
+  });
+  const universeOptions = Object.values(universes || {}).filter(
+    definition => definition.asset_class === activeMarket
+  );
 
   const toggleCategory = (cat) => {
     const next = new Set(expandedCats);
@@ -68,6 +82,30 @@ export default function FilterPanel() {
         </div>
       </div>
 
+      {/* Universe Selector */}
+      <div className="px-4 py-3 border-b border-scanner-border">
+        <label className="block text-[10px] font-medium text-scanner-text-dim uppercase tracking-widest mb-2">Universe</label>
+        <div className="space-y-1.5" role="radiogroup" aria-label="Scan universe">
+          {universeOptions.map(universe => (
+            <button
+              key={universe.key}
+              type="button"
+              role="radio"
+              aria-checked={activeUniverse === universe.key}
+              onClick={() => setUniverse(universe.key)}
+              className={`w-full flex items-center justify-between rounded-lg border px-3 py-2 text-left transition-all ${
+                activeUniverse === universe.key
+                  ? 'border-scanner-accent/50 bg-scanner-accent/10 text-scanner-accent'
+                  : 'border-scanner-border bg-scanner-bg text-scanner-text-dim hover:text-scanner-text'
+              }`}
+            >
+              <span className="text-xs font-medium">{universe.name}</span>
+              <span className="text-[10px] font-mono">{universe.count} symbols</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* Timeframe Selector */}
       <div className="px-4 py-3 border-b border-scanner-border">
         <label className="block text-[10px] font-medium text-scanner-text-dim uppercase tracking-widest mb-2">Timeframe</label>
@@ -84,7 +122,8 @@ export default function FilterPanel() {
                     ? 'bg-scanner-bg/40 text-scanner-text-dim/40 border border-dashed border-scanner-border cursor-not-allowed'
                   : 'bg-scanner-bg text-scanner-text-dim hover:text-scanner-text hover:bg-scanner-surface'
               }`}
-              title={!tf.available ? 'Unavailable on the current data plan' : tf.label}
+              title={tf.unavailableReason || tf.label}
+              aria-label={`${tf.shortLabel}${tf.unavailableReason ? ` — ${tf.unavailableReason}` : ''}`}
             >
               {tf.shortLabel}
             </button>
@@ -174,12 +213,20 @@ export default function FilterPanel() {
                 <div className="px-4 pb-3 space-y-1 animate-fade-in">
                   {Object.entries(filters).map(([filterKey, filter]) => {
                     const isSelected = selectedFilters.includes(filterKey);
+                    const unavailableReason = strategyUnavailableReason(
+                      { id: filterKey, ...filter }, activeMarket, timeframe, planCapabilities
+                    );
                     return (
                       <button
                         key={filterKey}
-                        onClick={() => toggleFilter(filterKey)}
+                        onClick={() => !unavailableReason && toggleFilter(filterKey)}
+                        disabled={Boolean(unavailableReason)}
+                        title={unavailableReason || filter.description}
+                        aria-label={`${filter.name}${unavailableReason ? ` — ${unavailableReason}` : ''}`}
                         className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-all ${
-                          isSelected
+                          unavailableReason
+                            ? 'bg-scanner-bg/20 border border-dashed border-scanner-border opacity-45 cursor-not-allowed'
+                            : isSelected
                             ? 'bg-scanner-accent/10 border border-scanner-accent/30'
                             : 'bg-scanner-bg/30 border border-transparent hover:border-scanner-border hover:bg-scanner-bg/60'
                         }`}
@@ -191,7 +238,7 @@ export default function FilterPanel() {
                         </div>
                         <div className="flex-1 min-w-0">
                           <p className={`text-xs font-medium ${isSelected ? 'text-scanner-accent' : 'text-scanner-text'}`}>{filter.name}</p>
-                          <p className="text-[10px] text-scanner-text-dim truncate">{filter.description}</p>
+                          <p className="text-[10px] text-scanner-text-dim truncate">{unavailableReason || filter.description}</p>
                         </div>
                       </button>
                     );

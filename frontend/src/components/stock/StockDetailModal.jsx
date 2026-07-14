@@ -6,7 +6,7 @@ import CandlestickChart from '../charts/CandlestickChart';
 import LoadingSpinner from '../common/LoadingSpinner';
 
 export default function StockDetailModal() {
-  const { isDetailOpen, selectedSymbol, selectedProviderSymbol, stockDetail, chartData, isLoadingDetail, isLoadingChart, detailError, watchlistError, closeDetail, changeDetailTimeframe, timeframe, timeframes, addToWatchlist, activeMarket } = useMarketStore();
+  const { isDetailOpen, selectedSymbol, selectedProviderSymbol, stockDetail, chartData, isLoadingDetail, isLoadingChart, detailError, watchlistError, closeDetail, changeDetailTimeframe, detailTimeframe: timeframe, timeframes, addToWatchlist, activeMarket } = useMarketStore();
   const { isAuthenticated, setAuthModal } = useAuthStore();
   const [activeTab, setActiveTab] = useState('indicators');
 
@@ -155,6 +155,7 @@ export default function StockDetailModal() {
                     data={chartData}
                     height={400}
                     indicators={chartIndicators}
+                    featureSeries={stockDetail?.feature_series}
                     symbol={selectedProviderSymbol || selectedSymbol}
                     timeframe={timeframe}
                     canDetectPatterns={isAuthenticated}

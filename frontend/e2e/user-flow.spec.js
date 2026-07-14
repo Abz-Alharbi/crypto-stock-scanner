@@ -42,8 +42,10 @@ const scanResult = {
   },
 }
 
-async function mockApi(page) {
+async function mockApi(page, options = {}) {
   const watchlist = []
+  const scanRequests = []
+  const jobs = new Map()
 
   await page.route('**/api/**', async (route) => {
     const request = route.request()
@@ -66,15 +68,39 @@ async function mockApi(page) {
         filters: {
           oscillators: {
             rsi_oversold: {
+              id: 'rsi_oversold',
               name: 'RSI Oversold',
               description: 'RSI below 30',
               category: 'oscillators',
+              available: true,
+              supported_asset_classes: ['stocks', 'crypto'],
+              supported_timeframes: ['1D'],
+            },
+            equity_only: {
+              id: 'equity_only',
+              name: 'Equity Only Strategy',
+              description: 'Stocks only',
+              category: 'oscillators',
+              available: true,
+              supported_asset_classes: ['stocks'],
+              supported_timeframes: ['1D'],
             },
           },
         },
         presets: {},
         timeframes: {
           '1D': { label: '1 Day', short_label: '1D', available: true },
+        },
+        universes: {
+          us_stocks_top: { key: 'us_stocks_top', name: 'All US Top Volume', asset_class: 'stocks', count: 80, default: true },
+          nasdaq_top: { key: 'nasdaq_top', name: 'NASDAQ Top Volume', asset_class: 'stocks', count: 50, default: false },
+          nyse_top: { key: 'nyse_top', name: 'NYSE Top Volume', asset_class: 'stocks', count: 30, default: false },
+          crypto_static: { key: 'crypto_static', name: 'Crypto Top USD Pairs', asset_class: 'crypto', count: 15, default: true },
+        },
+        plan_capabilities: {
+          strategy_ids: '*',
+          asset_classes: ['stocks', 'crypto'],
+          timeframes: ['1D'],
         },
       })
     }
@@ -92,16 +118,29 @@ async function mockApi(page) {
     }
 
     if (path === '/api/scan' && method === 'POST') {
-      return json({ job_id: 'job-1' }, 202)
+      const payload = request.postDataJSON()
+      scanRequests.push(payload)
+      const jobId = `job-${scanRequests.length}`
+      jobs.set(jobId, payload)
+      return json({ job_id: jobId }, 202)
     }
 
-    if (path === '/api/scan/status/job-1') {
+    if (path.startsWith('/api/scan/status/job-')) {
+      const jobId = path.split('/').at(-1)
+      const payload = jobs.get(jobId)
+      const meta = options.outcomeMeta || {
+        total_scanned: 10,
+        duration_seconds: 0.4,
+        timeframe: payload.timeframe,
+        market: payload.market,
+        universe: payload.universe,
+      }
       return json({
-        job_id: 'job-1',
+        job_id: jobId,
         status: 'completed',
         progress: 100,
-        results: [scanResult],
-        meta: { total_scanned: 10, duration_seconds: 0.4, timeframe: '1D' },
+        results: options.scanResults === undefined ? [scanResult] : options.scanResults,
+        meta,
       })
     }
 
@@ -154,6 +193,8 @@ async function mockApi(page) {
 
     return json({ error: `Unhandled mock route: ${method} ${path}` }, 404)
   })
+
+  return { scanRequests }
 }
 
 test('registers, logs in, runs a scan, adds to watchlist, and views admin panel', async ({ page }) => {
@@ -186,9 +227,9 @@ test('registers, logs in, runs a scan, adds to watchlist, and views admin panel'
 
   await expect(page.getByRole('button', { name: /admin_user/i })).toBeVisible()
 
-  await page.getByRole('button', { name: /crypto/i }).click()
+  await page.getByRole('button', { name: /Crypto$/i }).click()
   await expect(page.getByPlaceholder(/Search crypto/i)).toBeVisible()
-  await page.getByRole('button', { name: /stocks/i }).click()
+  await page.getByRole('button', { name: /Stocks$/i }).click()
   await expect(page.getByPlaceholder(/Search stocks/i)).toBeVisible()
 
   await page.getByRole('button', { name: /RSI Oversold/i }).click()
@@ -209,4 +250,72 @@ test('registers, logs in, runs a scan, adds to watchlist, and views admin panel'
   await expect(page.getByText(adminUser.email)).toBeVisible()
 
   expect(consoleErrors).toEqual([])
+})
+
+test('requests every registered universe and preserves completed result labels', async ({ page }) => {
+  const { scanRequests } = await mockApi(page)
+  await page.goto('/')
+
+  await page.getByRole('button', { name: /^RSI Oversold$/i }).click()
+  for (const [label, universe] of [
+    ['All US Top Volume', 'us_stocks_top'],
+    ['NASDAQ Top Volume', 'nasdaq_top'],
+    ['NYSE Top Volume', 'nyse_top'],
+  ]) {
+    await page.getByRole('radio', { name: new RegExp(label, 'i') }).click()
+    await page.getByRole('button', { name: /run scan \(1 filter\)/i }).click()
+    await expect.poll(() => scanRequests.at(-1)?.universe).toBe(universe)
+    await expect(page.getByText('AAPL').first()).toBeVisible()
+  }
+
+  await expect(page.getByText(/Stocks · NYSE Top Volume · 1D/)).toBeVisible()
+  await page.getByRole('button', { name: /Crypto$/i }).click()
+  await expect(page.getByText(/Stocks · NYSE Top Volume · 1D/)).toBeVisible()
+  await expect(page.getByText('AAPL').first()).toBeVisible()
+
+  await page.getByRole('button', { name: /^RSI Oversold$/i }).click()
+  await page.getByRole('radio', { name: /Crypto Top USD Pairs/i }).click()
+  await page.getByRole('button', { name: /run scan \(1 filter\)/i }).click()
+  await expect.poll(() => scanRequests.at(-1)?.universe).toBe('crypto_static')
+
+  expect(scanRequests.map(request => request.universe)).toEqual([
+    'us_stocks_top', 'nasdaq_top', 'nyse_top', 'crypto_static',
+  ])
+  expect(scanRequests.every(request => request.filters[0] === 'rsi_oversold')).toBe(true)
+})
+
+test('renders insufficient data and provider failure separately from no signal', async ({ page }) => {
+  await mockApi(page, {
+    scanResults: [],
+    outcomeMeta: {
+      total_scanned: 1,
+      duration_seconds: 0.2,
+      timeframe: '1D',
+      market: 'stocks',
+      universe: 'us_stocks_top',
+      symbol_outcomes: [
+        { symbol: 'MSFT', status: 'not_matched' },
+        { symbol: 'AAPL', status: 'insufficient_data', closed_bars: 60, required_bars: 200 },
+      ],
+      provider_failures: 1,
+      persistence_failures: [],
+    },
+  })
+  await page.goto('/')
+  await page.getByRole('button', { name: /^RSI Oversold$/i }).click()
+  await page.getByRole('button', { name: /run scan \(1 filter\)/i }).click()
+
+  await expect(page.getByTestId('outcome-not-matched')).toBeVisible()
+  await expect(page.getByTestId('outcome-insufficient')).toContainText('60 of 200 closed bars')
+  await expect(page.getByTestId('outcome-provider-failure')).toContainText('not a valid no-signal')
+})
+
+test('shows unsupported capability combinations as disabled controls', async ({ page }) => {
+  await mockApi(page)
+  await page.goto('/')
+  await page.getByRole('button', { name: /Crypto$/i }).click()
+
+  const unsupported = page.getByRole('button', { name: /Equity Only Strategy — Not supported for crypto/i })
+  await expect(unsupported).toBeVisible()
+  await expect(unsupported).toBeDisabled()
 })

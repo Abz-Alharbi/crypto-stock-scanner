@@ -51,6 +51,10 @@ def available_timeframes() -> frozenset[str]:
     return frozenset(get_plan_capabilities()["timeframes"])
 
 
+def plan_capabilities() -> dict[str, Any]:
+    return dict(get_plan_capabilities())
+
+
 def validate_strategy_selection(
     strategy_ids: Iterable[str],
     *,
@@ -116,6 +120,7 @@ __all__ = [
     "filters_payload",
     "get_flat_filters",
     "get_strategies",
+    "plan_capabilities",
     "required_features",
     "StrategyContext",
     "StrategyStatus",

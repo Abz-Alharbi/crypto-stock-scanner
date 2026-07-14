@@ -40,13 +40,43 @@ import useMarketStore from './useMarketStore'
 const resetMarketStore = () => {
   useMarketStore.setState({
     activeMarket: 'stocks',
-    filterDefinitions: {},
+    activeUniverse: 'us_stocks_top',
+    universes: {
+      us_stocks_top: { key: 'us_stocks_top', name: 'All US Top Volume', asset_class: 'stocks', default: true },
+      nasdaq_top: { key: 'nasdaq_top', name: 'NASDAQ Top Volume', asset_class: 'stocks' },
+      nyse_top: { key: 'nyse_top', name: 'NYSE Top Volume', asset_class: 'stocks' },
+      crypto_static: { key: 'crypto_static', name: 'Crypto Top USD Pairs', asset_class: 'crypto', default: true },
+    },
+    planCapabilities: { asset_classes: ['stocks', 'crypto'], timeframes: ['1D', '4H'], strategy_ids: '*' },
+    marketSelections: {
+      stocks: { universe: 'us_stocks_top', timeframe: '1D', filters: [] },
+      crypto: { universe: 'crypto_static', timeframe: '1D', filters: [] },
+    },
+    filterDefinitions: {
+      oscillators: {
+        rsi_oversold: {
+          id: 'rsi_oversold',
+          name: 'RSI Oversold',
+          available: true,
+          supported_asset_classes: ['stocks', 'crypto'],
+          supported_timeframes: ['1D', '4H'],
+        },
+        macd_bullish: {
+          id: 'macd_bullish',
+          name: 'MACD Bullish',
+          available: true,
+          supported_asset_classes: ['stocks', 'crypto'],
+          supported_timeframes: ['1D', '4H'],
+        },
+      },
+    },
     filterPresets: {},
     timeframes: {},
     selectedFilters: [],
     timeframe: '1D',
     scanResults: [],
     scanMeta: null,
+    scanContext: null,
     isScanning: false,
     scanError: null,
     scanProgress: '',
@@ -123,13 +153,14 @@ describe('scan template and notification store', () => {
         },
       },
     })
-    useMarketStore.setState({ activeMarket: 'crypto', timeframe: '1D', selectedFilters: ['rsi_oversold'] })
+    useMarketStore.setState({ activeMarket: 'crypto', activeUniverse: 'crypto_static', timeframe: '1D', selectedFilters: ['rsi_oversold'] })
 
     await useMarketStore.getState().saveScanTemplate('Bounce watch')
 
     expect(apiMocks.scanTemplateAPI.create).toHaveBeenCalledWith({
       name: 'Bounce watch',
       market: 'crypto',
+      universe: 'crypto_static',
       timeframe: '1D',
       filters: ['rsi_oversold'],
       limit: 30,
@@ -186,6 +217,7 @@ describe('scan store', () => {
 
     expect(apiMocks.marketAPI.scan).toHaveBeenCalledWith({
       market: 'stocks',
+      universe: 'us_stocks_top',
       filters: ['rsi_oversold'],
       timeframe: '1D',
       limit: 30,
@@ -214,13 +246,14 @@ describe('scan store', () => {
         meta: { market: 'crypto', total_scanned: 15, duration_seconds: 0.5, timeframe: '4H' },
       },
     })
-    useMarketStore.setState({ selectedFilters: ['macd_bullish'], activeMarket: 'crypto', timeframe: '4H' })
+    useMarketStore.setState({ selectedFilters: ['macd_bullish'], activeMarket: 'crypto', activeUniverse: 'crypto_static', timeframe: '4H' })
 
     const scanPromise = useMarketStore.getState().runScan()
     await Promise.resolve()
 
     expect(apiMocks.marketAPI.scan).toHaveBeenCalledWith({
       market: 'crypto',
+      universe: 'crypto_static',
       filters: ['macd_bullish'],
       timeframe: '4H',
       limit: 30,
@@ -241,5 +274,38 @@ describe('scan store', () => {
 
     expect(apiMocks.marketAPI.scan).not.toHaveBeenCalled()
     expect(useMarketStore.getState().scanError).toBe('Please select at least one filter')
+  })
+
+  it('keeps completed scan context immutable when the active market changes', async () => {
+    apiMocks.marketAPI.scan.mockResolvedValueOnce({ data: { job_id: 'job-context' } })
+    apiMocks.marketAPI.getScanStatus.mockResolvedValueOnce({
+      data: {
+        status: 'completed',
+        progress: 100,
+        results: [{ provider_symbol: 'AAPL', display_symbol: 'AAPL', market: 'stocks' }],
+        meta: { market: 'stocks', universe: 'nasdaq_top', total_scanned: 1, timeframe: '1D' },
+      },
+    })
+    useMarketStore.setState({
+      selectedFilters: ['rsi_oversold'],
+      activeMarket: 'stocks',
+      activeUniverse: 'nasdaq_top',
+      timeframe: '1D',
+    })
+
+    const scanPromise = useMarketStore.getState().runScan()
+    await vi.advanceTimersByTimeAsync(1000)
+    await scanPromise
+    useMarketStore.getState().setMarket('crypto')
+
+    expect(useMarketStore.getState().scanResults[0].provider_symbol).toBe('AAPL')
+    expect(useMarketStore.getState().scanMeta.context).toEqual({
+      asset_class: 'stocks',
+      scope: 'universe',
+      universe: 'nasdaq_top',
+      timeframe: '1D',
+      strategy_ids: ['rsi_oversold'],
+    })
+    expect(useMarketStore.getState().activeMarket).toBe('crypto')
   })
 })

@@ -140,6 +140,21 @@ def test_search_route_uses_mocked_polygon_client(client):
     assert results[0]["name"] == "Apple Inc."
 
 
+def test_filters_publish_registered_universe_capabilities(client):
+    payload = client.get("/api/filters").get_json()
+
+    assert set(payload["universes"]) == {
+        "us_stocks_top",
+        "nasdaq_top",
+        "nyse_top",
+        "crypto_static",
+    }
+    assert payload["universes"]["nasdaq_top"]["asset_class"] == "stocks"
+    assert payload["universes"]["crypto_static"]["asset_class"] == "crypto"
+    assert payload["universes"]["crypto_static"]["count"] == 15
+    assert set(payload["plan_capabilities"]["asset_classes"]) == {"stocks", "crypto"}
+
+
 @pytest.mark.parametrize("universe", ["nasdaq_top", "nyse_top"])
 def test_scan_route_completes_with_mocked_polygon_data(client, monkeypatch, universe):
     from backend.services import scan_jobs

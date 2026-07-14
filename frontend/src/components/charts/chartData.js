@@ -27,3 +27,10 @@ export function toVolumePoint(bar) {
     color,
   }
 }
+
+export function toAuthoritativeIndicatorPoints(points, validTimes) {
+  return (points || []).map(point => ({
+    time: point.t > 10_000_000_000 ? Math.floor(point.t / 1000) : point.t,
+    value: point.value,
+  })).filter(point => validTimes.has(point.time) && Number.isFinite(point.value))
+}

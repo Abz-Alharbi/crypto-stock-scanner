@@ -1,6 +1,6 @@
 import React from 'react'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { act, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 
 import FilterPanel from './FilterPanel'
@@ -12,6 +12,9 @@ const filters = {
       name: 'RSI Oversold',
       description: 'RSI below 30',
       category: 'oscillators',
+      available: true,
+      supported_asset_classes: ['stocks', 'crypto'],
+      supported_timeframes: ['1m', '5m', '15m', '30m', '45m', '1H', '4H', '1D', '1W', '1M', '1Y'],
     },
   },
   moving_averages: {
@@ -19,6 +22,9 @@ const filters = {
       name: 'MACD Bullish',
       description: 'MACD line above signal line',
       category: 'moving_averages',
+      available: true,
+      supported_asset_classes: ['stocks'],
+      supported_timeframes: ['1m', '5m', '15m', '30m', '45m', '1H', '4H', '1D', '1W', '1M', '1Y'],
     },
   },
 }
@@ -40,6 +46,15 @@ const timeframeConfig = Object.fromEntries(
 describe('Scanner filter panel', () => {
   beforeEach(() => {
     useMarketStore.setState({
+      activeMarket: 'stocks',
+      activeUniverse: 'us_stocks_top',
+      universes: {
+        us_stocks_top: { key: 'us_stocks_top', name: 'All US Top Volume', asset_class: 'stocks', count: 80 },
+        nasdaq_top: { key: 'nasdaq_top', name: 'NASDAQ Top Volume', asset_class: 'stocks', count: 50 },
+        nyse_top: { key: 'nyse_top', name: 'NYSE Top Volume', asset_class: 'stocks', count: 30 },
+        crypto_static: { key: 'crypto_static', name: 'Crypto Top USD Pairs', asset_class: 'crypto', count: 15 },
+      },
+      planCapabilities: { asset_classes: ['stocks', 'crypto'], timeframes: canonicalTimeframes, strategy_ids: '*' },
       filterDefinitions: filters,
       filterPresets: {
         bullish_momentum: {
@@ -54,6 +69,21 @@ describe('Scanner filter panel', () => {
       isScanning: false,
       runScan: vi.fn(),
     })
+  })
+
+  it('selects backend-advertised universes and visibly disables unsupported strategies', async () => {
+    const user = userEvent.setup()
+    render(<FilterPanel />)
+
+    await user.click(screen.getByRole('radio', { name: /NASDAQ Top Volume/i }))
+    expect(useMarketStore.getState().activeUniverse).toBe('nasdaq_top')
+
+    act(() => useMarketStore.getState().setMarket('crypto'))
+
+    expect(screen.getByRole('radio', { name: /Crypto Top USD Pairs/i })).toBeVisible()
+    const unsupported = screen.getByRole('button', { name: /MACD Bullish — Not supported for crypto/i })
+    expect(unsupported).toBeDisabled()
+    expect(unsupported).toHaveClass('opacity-45')
   })
 
   it('selects filters, presets, and runs the scan action', async () => {

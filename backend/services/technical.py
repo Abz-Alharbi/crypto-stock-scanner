@@ -8,6 +8,113 @@ logger = logging.getLogger(__name__)
 class TechnicalAnalysis:
     """Complete technical analysis calculations"""
 
+    FEATURE_SERIES_VERSION = "technical-analysis-v1"
+
+    @staticmethod
+    def _ema_series(prices, period):
+        """SMA-seeded EMA using the conventional 2 / (period + 1) alpha."""
+        values = np.asarray(prices, dtype=float)
+        result = np.full(len(values), np.nan)
+        if len(values) < period:
+            return result
+        alpha = 2.0 / (period + 1)
+        result[period - 1] = float(np.mean(values[:period]))
+        for index in range(period, len(values)):
+            result[index] = (
+                alpha * values[index]
+                + (1.0 - alpha) * result[index - 1]
+            )
+        return result
+
+    @staticmethod
+    def _macd_series(prices, fast=12, slow=26, signal=9):
+        values = np.asarray(prices, dtype=float)
+        line = TechnicalAnalysis._ema_series(values, fast) - TechnicalAnalysis._ema_series(values, slow)
+        signal_line = np.full(len(values), np.nan)
+        first_line_index = slow - 1
+        if len(values) >= slow + signal - 1:
+            valid_signal = TechnicalAnalysis._ema_series(
+                line[first_line_index:], signal
+            )
+            signal_line[first_line_index:] = valid_signal
+        return line, signal_line, line - signal_line
+
+    @staticmethod
+    def indicator_series(bars):
+        """Return chart-ready series from the same formulas used by analysis.
+
+        Values are aligned to closed provider candles.  The frontend renders
+        these points directly and never recalculates decision-bearing values.
+        """
+        closed = [bar for bar in bars or [] if not bar.get('partial', False)]
+        if not closed:
+            return {
+                'version': TechnicalAnalysis.FEATURE_SERIES_VERSION,
+                'ema': {},
+                'bollinger_bands': {},
+                'macd': {},
+                'rsi': [],
+            }
+
+        times = [bar['t'] for bar in closed]
+        closes = np.asarray([bar['c'] for bar in closed], dtype=float)
+        prices = pd.Series(closes)
+
+        def points(values, start_index):
+            return [
+                {'t': times[index], 'value': float(values[index])}
+                for index in range(start_index, len(times))
+                if pd.notna(values[index])
+            ]
+
+        ema = {}
+        for period in (9, 20, 50, 200):
+            values = TechnicalAnalysis._ema_series(closes, period)
+            ema[f'ema_{period}'] = points(values, period - 1)
+
+        rolling = prices.rolling(window=20)
+        middle = rolling.mean().to_numpy()
+        deviation = rolling.std(ddof=0).to_numpy()
+        bollinger = {
+            'upper': points(middle + (2 * deviation), 19),
+            'middle': points(middle, 19),
+            'lower': points(middle - (2 * deviation), 19),
+        }
+
+        macd_line, signal, histogram = TechnicalAnalysis._macd_series(closes)
+        macd = {
+            'line': points(macd_line, 33),
+            'signal': points(signal, 33),
+            'histogram': points(histogram, 33),
+        }
+
+        rsi_values = np.full(len(closes), np.nan)
+        if len(closes) >= 15:
+            deltas = np.diff(closes)
+            gains = np.where(deltas > 0, deltas, 0)
+            losses = np.where(deltas < 0, -deltas, 0)
+            avg_gain = float(np.mean(gains[:14]))
+            avg_loss = float(np.mean(losses[:14]))
+            rsi_values[14] = (
+                100.0 if avg_loss == 0
+                else 100 - (100 / (1 + (avg_gain / avg_loss)))
+            )
+            for delta_index in range(14, len(deltas)):
+                avg_gain = (avg_gain * 13 + gains[delta_index]) / 14
+                avg_loss = (avg_loss * 13 + losses[delta_index]) / 14
+                rsi_values[delta_index + 1] = (
+                    100.0 if avg_loss == 0
+                    else 100 - (100 / (1 + (avg_gain / avg_loss)))
+                )
+
+        return {
+            'version': TechnicalAnalysis.FEATURE_SERIES_VERSION,
+            'ema': ema,
+            'bollinger_bands': bollinger,
+            'macd': macd,
+            'rsi': points(rsi_values, 14),
+        }
+
     @staticmethod
     def calculate_sma(prices, period):
         if len(prices) < period:
@@ -18,9 +125,7 @@ class TechnicalAnalysis:
     def calculate_ema(prices, period):
         if len(prices) < period:
             return None
-        series = pd.Series(prices)
-        ema = series.ewm(span=period, adjust=False).mean()
-        return float(ema.iloc[-1])
+        return float(TechnicalAnalysis._ema_series(prices, period)[-1])
 
     @staticmethod
     def calculate_rsi(prices, period=14):
@@ -44,15 +149,16 @@ class TechnicalAnalysis:
 
     @staticmethod
     def calculate_macd(prices, fast=12, slow=26, signal=9):
-        if len(prices) < slow + signal:
+        if len(prices) < slow + signal - 1:
             return None, None, None
-        series = pd.Series(prices)
-        ema_fast = series.ewm(span=fast, adjust=False).mean()
-        ema_slow = series.ewm(span=slow, adjust=False).mean()
-        macd_line = ema_fast - ema_slow
-        signal_line = macd_line.ewm(span=signal, adjust=False).mean()
-        histogram = macd_line - signal_line
-        return float(macd_line.iloc[-1]), float(signal_line.iloc[-1]), float(histogram.iloc[-1])
+        macd_line, signal_line, histogram = TechnicalAnalysis._macd_series(
+            prices, fast, slow, signal
+        )
+        return (
+            float(macd_line[-1]),
+            float(signal_line[-1]),
+            float(histogram[-1]),
+        )
 
     @staticmethod
     def calculate_bollinger_bands(prices, period=20, std_dev=2):
@@ -60,7 +166,7 @@ class TechnicalAnalysis:
             return None, None, None
         series = pd.Series(prices[-period:])
         middle = float(series.mean())
-        std = float(series.std())
+        std = float(series.std(ddof=0))
         upper = middle + (std_dev * std)
         lower = middle - (std_dev * std)
         return upper, middle, lower
