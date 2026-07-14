@@ -803,9 +803,31 @@ class TechnicalAnalysis:
             patterns.append({'pattern': 'Ascending Triangle', 'type': 'bullish', 'strength': 'medium'})
 
         # Descending Triangle
-        lows_stable = (max(recent[-5:]) - min(recent)) / min(recent) < 0.02
-        highs_falling = all(recent[i] <= recent[i - 3] * 1.01 for i in range(3, len(recent)) if i < len(recent))
-        if lows_stable and highs_falling:
+        # Use section envelopes as close-price pivots. A descending triangle
+        # needs resistance to fall toward support while support itself remains
+        # materially flatter; a uniform downtrend has similar slopes and must
+        # not qualify.
+        sections = np.array_split(np.asarray(recent, dtype=float), 4)
+        resistance = np.asarray([section.max() for section in sections])
+        support = np.asarray([section.min() for section in sections])
+        section_indexes = np.arange(len(sections), dtype=float)
+        price_scale = float(np.mean(recent))
+        resistance_slope = float(np.polyfit(section_indexes, resistance, 1)[0])
+        support_slope = float(np.polyfit(section_indexes, support, 1)[0])
+        normalized_resistance_slope = resistance_slope / price_scale if price_scale else 0
+        normalized_support_range = (
+            float(support.max() - support.min()) / price_scale if price_scale else 0
+        )
+        initial_spread = float(resistance[0] - support[0])
+        final_spread = float(resistance[-1] - support[-1])
+
+        resistance_falling = normalized_resistance_slope <= -0.002
+        support_relatively_flat = (
+            abs(support_slope) <= abs(resistance_slope) * 0.35
+            and normalized_support_range <= 0.015
+        )
+        converging = initial_spread > 0 and 0 < final_spread <= initial_spread * 0.75
+        if resistance_falling and support_relatively_flat and converging:
             patterns.append({'pattern': 'Descending Triangle', 'type': 'bearish', 'strength': 'medium'})
 
         # Bullish Flag

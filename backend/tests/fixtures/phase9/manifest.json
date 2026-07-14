@@ -1,0 +1,359 @@
+{
+  "source": "Massive/Polygon aggregates",
+  "as_of": "2025-07-12T00:00:00+00:00",
+  "snapshot_count": 44,
+  "snapshots": [
+    {
+      "file": "stocks_AAPL_1min.json",
+      "asset_class": "stocks",
+      "symbol": "AAPL",
+      "timeframe": "1m",
+      "closed_bars": 240,
+      "sha256": "50d428f0cb05670cf7932b23e9d6431481b436d1017865480c33a7fba8a3e16a"
+    },
+    {
+      "file": "stocks_AAPL_5m.json",
+      "asset_class": "stocks",
+      "symbol": "AAPL",
+      "timeframe": "5m",
+      "closed_bars": 240,
+      "sha256": "dcb54a5a0485be40cb5092b4c8543b0ea1adfb0f68f8eb7751b3efe1a88a7dd9"
+    },
+    {
+      "file": "stocks_AAPL_15m.json",
+      "asset_class": "stocks",
+      "symbol": "AAPL",
+      "timeframe": "15m",
+      "closed_bars": 240,
+      "sha256": "c3089d70f5372b413c1380b915fba403f32e30317eadba4c621c47866bed536d"
+    },
+    {
+      "file": "stocks_AAPL_30m.json",
+      "asset_class": "stocks",
+      "symbol": "AAPL",
+      "timeframe": "30m",
+      "closed_bars": 228,
+      "sha256": "cc9eb287c885a3fef0154367a6f141054861f05f86f2b8782a086f53b24f10a5"
+    },
+    {
+      "file": "stocks_AAPL_45m.json",
+      "asset_class": "stocks",
+      "symbol": "AAPL",
+      "timeframe": "45m",
+      "closed_bars": 230,
+      "sha256": "03154eb3217893344f09fd0cfc7bf07572e85e476af3c64e80062e1ea5f930c1"
+    },
+    {
+      "file": "stocks_AAPL_1H.json",
+      "asset_class": "stocks",
+      "symbol": "AAPL",
+      "timeframe": "1H",
+      "closed_bars": 195,
+      "sha256": "7164608c34f8a5076a11c13092f7d0c91acd63f98eb4cefd52d8c315fa9b9e72"
+    },
+    {
+      "file": "stocks_AAPL_4H.json",
+      "asset_class": "stocks",
+      "symbol": "AAPL",
+      "timeframe": "4H",
+      "closed_bars": 110,
+      "sha256": "88d8068b9b8b0cb046ec4b86400b2393385d3b7a6dfe90866a75d8b6ec3594ca"
+    },
+    {
+      "file": "stocks_AAPL_1D.json",
+      "asset_class": "stocks",
+      "symbol": "AAPL",
+      "timeframe": "1D",
+      "closed_bars": 221,
+      "sha256": "cae73754804d5eb82467ded38664fb1d72ab57b87d6acaedf5fc16cbe3ccfb89"
+    },
+    {
+      "file": "stocks_AAPL_1W.json",
+      "asset_class": "stocks",
+      "symbol": "AAPL",
+      "timeframe": "1W",
+      "closed_bars": 209,
+      "sha256": "7dd66f7ab6acfe2168c32cf4def147f36ba492c577c364f4bd6084cc1e99b0d3"
+    },
+    {
+      "file": "stocks_AAPL_1month.json",
+      "asset_class": "stocks",
+      "symbol": "AAPL",
+      "timeframe": "1M",
+      "closed_bars": 48,
+      "sha256": "287c528a1e344638e39f9e051134af95aa2fe88d8eed54df2a23d790d3d9e9f0"
+    },
+    {
+      "file": "stocks_AAPL_1Y.json",
+      "asset_class": "stocks",
+      "symbol": "AAPL",
+      "timeframe": "1Y",
+      "closed_bars": 4,
+      "sha256": "96108f6307fc8bb59f2a6ad8baafe2fed9a38b43cf30e299a8ed8e57e8cb4442"
+    },
+    {
+      "file": "stocks_MSFT_1min.json",
+      "asset_class": "stocks",
+      "symbol": "MSFT",
+      "timeframe": "1m",
+      "closed_bars": 240,
+      "sha256": "cba177acf87a3238c5689fe40095950a08abb43d7c24ac486c0e2f4bf994e857"
+    },
+    {
+      "file": "stocks_MSFT_5m.json",
+      "asset_class": "stocks",
+      "symbol": "MSFT",
+      "timeframe": "5m",
+      "closed_bars": 240,
+      "sha256": "576de39bf9c80a2071f759aa6f15f461cd092ca7f74c02fd4dff98f5b1b50132"
+    },
+    {
+      "file": "stocks_MSFT_15m.json",
+      "asset_class": "stocks",
+      "symbol": "MSFT",
+      "timeframe": "15m",
+      "closed_bars": 240,
+      "sha256": "33a0e679e92c7b0f27f1bf76f4c9d3b40e8b49c417cd84eb9dd0d763cf370a7f"
+    },
+    {
+      "file": "stocks_MSFT_30m.json",
+      "asset_class": "stocks",
+      "symbol": "MSFT",
+      "timeframe": "30m",
+      "closed_bars": 228,
+      "sha256": "2bb29e62a4145991e2ab6d806e61afc84233ed312cb812c110a8678ea59cfdd9"
+    },
+    {
+      "file": "stocks_MSFT_45m.json",
+      "asset_class": "stocks",
+      "symbol": "MSFT",
+      "timeframe": "45m",
+      "closed_bars": 230,
+      "sha256": "3df4f3bd7be59db4e4128bcd8480df3ccdfa36e8326795f05efa7eb369ebda8e"
+    },
+    {
+      "file": "stocks_MSFT_1H.json",
+      "asset_class": "stocks",
+      "symbol": "MSFT",
+      "timeframe": "1H",
+      "closed_bars": 195,
+      "sha256": "38ed21f10b2364c849b2845bd5f9e201aab3e72cf76c1bc2c3dd91ce3b6c4f71"
+    },
+    {
+      "file": "stocks_MSFT_4H.json",
+      "asset_class": "stocks",
+      "symbol": "MSFT",
+      "timeframe": "4H",
+      "closed_bars": 110,
+      "sha256": "301ffd4543783f8eab1416eb62f24cc169ab23dcc9d66959fb3ae462028b3d23"
+    },
+    {
+      "file": "stocks_MSFT_1D.json",
+      "asset_class": "stocks",
+      "symbol": "MSFT",
+      "timeframe": "1D",
+      "closed_bars": 221,
+      "sha256": "515334f7f749ce76d66ae787bedffd168685998c6a91639f35051735022e5e0c"
+    },
+    {
+      "file": "stocks_MSFT_1W.json",
+      "asset_class": "stocks",
+      "symbol": "MSFT",
+      "timeframe": "1W",
+      "closed_bars": 209,
+      "sha256": "45cadafc48b31e25fc4ddd479af06fc06c4d65d057353aad32df54d67988ea06"
+    },
+    {
+      "file": "stocks_MSFT_1month.json",
+      "asset_class": "stocks",
+      "symbol": "MSFT",
+      "timeframe": "1M",
+      "closed_bars": 48,
+      "sha256": "66d6953542e4a2b75bde9478b8596a8a3467152bae0ed889c7517d73ca89e1d1"
+    },
+    {
+      "file": "stocks_MSFT_1Y.json",
+      "asset_class": "stocks",
+      "symbol": "MSFT",
+      "timeframe": "1Y",
+      "closed_bars": 4,
+      "sha256": "26ac6d16b8ab85a01952d7c37e877fa4b1432cb0cf7b0b5569f989e2ea8088dd"
+    },
+    {
+      "file": "crypto_X_BTCUSD_1min.json",
+      "asset_class": "crypto",
+      "symbol": "X:BTCUSD",
+      "timeframe": "1m",
+      "closed_bars": 240,
+      "sha256": "6265b44d6ea0620e2dc119b57a35716fc3b1ecedc7916279f3e9afaec1e35c46"
+    },
+    {
+      "file": "crypto_X_BTCUSD_5m.json",
+      "asset_class": "crypto",
+      "symbol": "X:BTCUSD",
+      "timeframe": "5m",
+      "closed_bars": 240,
+      "sha256": "c1d0d26f0fefc2e17b35a100b8122de857b128c0b1f315a5bb701f271963dce9"
+    },
+    {
+      "file": "crypto_X_BTCUSD_15m.json",
+      "asset_class": "crypto",
+      "symbol": "X:BTCUSD",
+      "timeframe": "15m",
+      "closed_bars": 240,
+      "sha256": "0e1fbba8324c7d36fb8f028c51d974d9a0f7c08415ff8f3fd208dfe73f721721"
+    },
+    {
+      "file": "crypto_X_BTCUSD_30m.json",
+      "asset_class": "crypto",
+      "symbol": "X:BTCUSD",
+      "timeframe": "30m",
+      "closed_bars": 240,
+      "sha256": "7229302102ef3e1d6a76a86781eebe50dfba30595f82892349ad32ed30c03c75"
+    },
+    {
+      "file": "crypto_X_BTCUSD_45m.json",
+      "asset_class": "crypto",
+      "symbol": "X:BTCUSD",
+      "timeframe": "45m",
+      "closed_bars": 224,
+      "sha256": "d7bc5f8db3f199f7f86bf531a56318083ec6ac00e9743b99268312327544a171"
+    },
+    {
+      "file": "crypto_X_BTCUSD_1H.json",
+      "asset_class": "crypto",
+      "symbol": "X:BTCUSD",
+      "timeframe": "1H",
+      "closed_bars": 240,
+      "sha256": "b8beb4356f5ff89c6c4b75e5b705daee4c7d3f2bfc07a4ccb0e0f47547850d64"
+    },
+    {
+      "file": "crypto_X_BTCUSD_4H.json",
+      "asset_class": "crypto",
+      "symbol": "X:BTCUSD",
+      "timeframe": "4H",
+      "closed_bars": 222,
+      "sha256": "001a9ed273f0aba9f2e2f941657ae867ed6da28ef2f5d0805624628e53713f62"
+    },
+    {
+      "file": "crypto_X_BTCUSD_1D.json",
+      "asset_class": "crypto",
+      "symbol": "X:BTCUSD",
+      "timeframe": "1D",
+      "closed_bars": 220,
+      "sha256": "5c86aae0944e3d2ac1535ba0f49c5a99b9b48cfb94fc419a74f21c3ebf6b87c3"
+    },
+    {
+      "file": "crypto_X_BTCUSD_1W.json",
+      "asset_class": "crypto",
+      "symbol": "X:BTCUSD",
+      "timeframe": "1W",
+      "closed_bars": 52,
+      "sha256": "818e55a034e0bae2e9c558c08909a970991dcfb6dc26d2d39c86943b77126781"
+    },
+    {
+      "file": "crypto_X_BTCUSD_1month.json",
+      "asset_class": "crypto",
+      "symbol": "X:BTCUSD",
+      "timeframe": "1M",
+      "closed_bars": 12,
+      "sha256": "1c7cfcddf4e0c4a2d1d457f96b2e9546e5b5ab84f98d171aa50c78ff10ac5514"
+    },
+    {
+      "file": "crypto_X_BTCUSD_1Y.json",
+      "asset_class": "crypto",
+      "symbol": "X:BTCUSD",
+      "timeframe": "1Y",
+      "closed_bars": 1,
+      "sha256": "b96999b46fb73768409ee0c7678b1dc98072d2bf852ccdb2f9cc16209d83f42e"
+    },
+    {
+      "file": "crypto_X_ETHUSD_1min.json",
+      "asset_class": "crypto",
+      "symbol": "X:ETHUSD",
+      "timeframe": "1m",
+      "closed_bars": 240,
+      "sha256": "af0ede151ee0a1b36dae190be05675ebcc1d97fc5bc708cdce99aadf5d586ae1"
+    },
+    {
+      "file": "crypto_X_ETHUSD_5m.json",
+      "asset_class": "crypto",
+      "symbol": "X:ETHUSD",
+      "timeframe": "5m",
+      "closed_bars": 240,
+      "sha256": "c7358135795f052d9fb7368a0f7d9a762abb65ab1316fa1285507bfdd602bdd2"
+    },
+    {
+      "file": "crypto_X_ETHUSD_15m.json",
+      "asset_class": "crypto",
+      "symbol": "X:ETHUSD",
+      "timeframe": "15m",
+      "closed_bars": 240,
+      "sha256": "edc02c8fcf258887259afca8abba3b742253d687965b69b09da9262b063cd72f"
+    },
+    {
+      "file": "crypto_X_ETHUSD_30m.json",
+      "asset_class": "crypto",
+      "symbol": "X:ETHUSD",
+      "timeframe": "30m",
+      "closed_bars": 240,
+      "sha256": "cbc72a4c1b48882f2af9133f19d22687191b779ef715b41b61dd0de363de313d"
+    },
+    {
+      "file": "crypto_X_ETHUSD_45m.json",
+      "asset_class": "crypto",
+      "symbol": "X:ETHUSD",
+      "timeframe": "45m",
+      "closed_bars": 224,
+      "sha256": "3b273c0541740c944022b991542cdd9c1bbfd08dcc5fd032f144e79678de989c"
+    },
+    {
+      "file": "crypto_X_ETHUSD_1H.json",
+      "asset_class": "crypto",
+      "symbol": "X:ETHUSD",
+      "timeframe": "1H",
+      "closed_bars": 240,
+      "sha256": "dc2d4101e0681d2238057d8a81e975a120cf4549e86cdb2ed6ef8c4269b405f4"
+    },
+    {
+      "file": "crypto_X_ETHUSD_4H.json",
+      "asset_class": "crypto",
+      "symbol": "X:ETHUSD",
+      "timeframe": "4H",
+      "closed_bars": 222,
+      "sha256": "f5bc3716d97f62f2077fe17e25c9c0727fef04afa10749429d331e6ae76e50dd"
+    },
+    {
+      "file": "crypto_X_ETHUSD_1D.json",
+      "asset_class": "crypto",
+      "symbol": "X:ETHUSD",
+      "timeframe": "1D",
+      "closed_bars": 220,
+      "sha256": "ddb26b09fc24f75c5ea6b173e43b988726df466f7353ad6ed0e0452fba04ef0d"
+    },
+    {
+      "file": "crypto_X_ETHUSD_1W.json",
+      "asset_class": "crypto",
+      "symbol": "X:ETHUSD",
+      "timeframe": "1W",
+      "closed_bars": 52,
+      "sha256": "f0128612a0f8b9a60d545cabaa10d28b12b697cfc0401ccf9912f7350537238d"
+    },
+    {
+      "file": "crypto_X_ETHUSD_1month.json",
+      "asset_class": "crypto",
+      "symbol": "X:ETHUSD",
+      "timeframe": "1M",
+      "closed_bars": 12,
+      "sha256": "c0ee8b0fa3e147d3f4e80ec9466411a974cdb07d7138fd00f749ae3abad111cf"
+    },
+    {
+      "file": "crypto_X_ETHUSD_1Y.json",
+      "asset_class": "crypto",
+      "symbol": "X:ETHUSD",
+      "timeframe": "1Y",
+      "closed_bars": 1,
+      "sha256": "9c324a89f4e384a50b3a42218c11bc2ba485b375f69fab7909001b20b3d9149b"
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "source": "Massive/Polygon aggregates",
+  "as_of": "2025-07-12T00:00:00+00:00",
+  "asset_class": "crypto",
+  "symbol": "X:ETHUSD",
+  "venue": "GLOBAL_CRYPTO",
+  "timeframe": "1Y",
+  "bars": [
+    {
+      "t": 1704067200000,
+      "o": 2281.03,
+      "h": 4109,
+      "l": 1860,
+      "c": 3330.32,
+      "v": 47118920.522591315
+    }
+  ]
+}
