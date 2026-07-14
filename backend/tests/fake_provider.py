@@ -16,6 +16,7 @@ class FakeProvider:
         self.reference_results = {}
         self.crypto_snapshot_results = []
         self.grouped_daily_results = {}
+        self.grouped_daily_crypto_results = {}
         self.ticker_details_by_symbol = {}
         self.failure_specs = {}
         self.calls = []
@@ -82,7 +83,8 @@ class FakeProvider:
             limit=limit,
         )
         self._raise_if_configured("reference_universe", asset_class=parsed_asset_class)
-        return deepcopy(self.reference_results.get(venue, []))[:limit]
+        key = "crypto" if parsed_asset_class is AssetClass.CRYPTO else venue
+        return deepcopy(self.reference_results.get(key, []))[:limit]
 
     def crypto_snapshot(self):
         self._record("crypto_snapshot")
@@ -94,6 +96,14 @@ class FakeProvider:
         self._record("grouped_daily_stocks", day=day_value)
         self._raise_if_configured("grouped_daily_stocks", asset_class=AssetClass.EQUITY)
         return deepcopy(self.grouped_daily_results.get(day_value, []))
+
+    def grouped_daily_crypto(self, day):
+        day_value = day.isoformat() if hasattr(day, "isoformat") else str(day)
+        self._record("grouped_daily_crypto", day=day_value)
+        self._raise_if_configured(
+            "grouped_daily_crypto", asset_class=AssetClass.CRYPTO
+        )
+        return deepcopy(self.grouped_daily_crypto_results.get(day_value, []))
 
     def ticker_details(self, instrument: Instrument):
         if not isinstance(instrument, Instrument):

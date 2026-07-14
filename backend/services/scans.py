@@ -147,12 +147,13 @@ def health_payload():
     stock_universe = universe_status["universes"]["us_stocks_top"]
     crypto_universe = universe_status["universes"]["crypto_static"]
     active_stock_count = stock_universe["count"]
+    active_crypto_count = crypto_universe["count"]
 
     return {
         "status": "healthy",
         "api_key_configured": get_provider().configured,
         "stock_symbols": active_stock_count,
-        "crypto_symbols": fallback_crypto_count,
+        "crypto_symbols": active_crypto_count,
         "fallback_stock_symbols": fallback_stock_count,
         "fallback_crypto_symbols": fallback_crypto_count,
         "universe_counts": {
@@ -166,11 +167,11 @@ def health_payload():
                 "last_computed_at": universe_status["last_computed_at"],
             },
             "crypto": {
-                "active": crypto_universe["count"],
-                "dynamic": 0,
+                "active": active_crypto_count,
+                "dynamic": universe_status["crypto_count"],
                 "fallback": fallback_crypto_count,
                 "using_fallback": crypto_universe["source"] == "fallback",
-                "last_computed_at": None,
+                "last_computed_at": universe_status["crypto_last_computed_at"],
             },
         },
         "timestamp": datetime.utcnow().isoformat(),

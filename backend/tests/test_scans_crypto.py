@@ -1,4 +1,6 @@
+from backend.extensions import db
 from backend.models.scan import ScanHistory, ScanResult
+from backend.models.universe import UniverseSymbol
 from backend.services import scans
 
 
@@ -31,7 +33,8 @@ def test_current_crypto_scan_attempts_fixed_universe_and_persists_crypto_matches
     assert payload["meta"]["total_attempted"] == 15
     assert payload["meta"]["total_scanned"] == 15
     assert payload["meta"]["universe"] == "crypto_static"
-    assert payload["meta"]["universe_source"] == "static"
+    assert payload["meta"]["universe_source"] == "fallback"
+    assert payload["meta"]["universe_degraded"] is True
     assert len(payload["results"]) == 15
     bar_calls = [call for call in fake_provider.calls if call["operation"] == "get_bars"]
     assert len(bar_calls) == 15
@@ -42,6 +45,56 @@ def test_current_crypto_scan_attempts_fixed_universe_and_persists_crypto_matches
     assert all(row.market == "crypto" and row.provider_symbol.startswith("X:") for row in persisted)
     assert history.market == "crypto"
     assert history.total_scanned == 15
+
+
+def test_crypto_scan_uses_ranked_database_universe_and_keeps_context_labels(
+    app, fake_provider
+):
+    fake_provider.default_bars = _bars_with_bullish_engulfing()
+
+    with app.app_context():
+        db.session.add_all(
+            [
+                UniverseSymbol(
+                    symbol="X:BTCUSD",
+                    asset_class="crypto",
+                    venue="GLOBAL_CRYPTO",
+                    quote_currency="USD",
+                    universe_key="crypto_static",
+                    avg_daily_volume=10_000_000,
+                    rank=1,
+                ),
+                UniverseSymbol(
+                    symbol="X:ETHUSD",
+                    asset_class="crypto",
+                    venue="GLOBAL_CRYPTO",
+                    quote_currency="USD",
+                    universe_key="crypto_static",
+                    avg_daily_volume=5_000_000,
+                    rank=2,
+                ),
+            ]
+        )
+        db.session.commit()
+
+        payload = scans.scan_market(
+            "crypto",
+            ["bullish_pattern"],
+            "1D",
+            50,
+            job_id="crypto-ranked",
+        )
+
+    assert payload["meta"]["universe"] == "crypto_static"
+    assert payload["meta"]["universe_source"] == "database"
+    assert payload["meta"]["universe_degraded"] is False
+    assert payload["meta"]["market"] == "crypto"
+    assert payload["meta"]["timeframe"] == "1D"
+    assert payload["meta"]["total_attempted"] == 2
+    assert {result["provider_symbol"] for result in payload["results"]} == {
+        "X:BTCUSD",
+        "X:ETHUSD",
+    }
 
 
 def test_current_crypto_intraday_scan_forwards_canonical_provider_mapping(app, fake_provider):

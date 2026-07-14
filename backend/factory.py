@@ -225,12 +225,12 @@ def _register_cli(app):
 
     @app.cli.command("rebuild-universe")
     def rebuild_universe_command():
-        """Rebuild the stock scan universe from Polygon volume data."""
+        """Rebuild equity and crypto scan universes from Polygon volume data."""
         import json
 
         from backend.services.universe import universe_builder
 
-        payload = universe_builder.build_and_save_universe()
+        payload = universe_builder.build_and_save_all_universes()
         click.echo(json.dumps(payload, indent=2))
 
 

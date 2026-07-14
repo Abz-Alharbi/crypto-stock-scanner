@@ -135,6 +135,28 @@ class PolygonClientTests(unittest.TestCase):
         self.assertEqual(client.session.calls[0]["params"]["exchange"], "XNAS")
         self.assertEqual(client.session.calls[1]["params"], {})
 
+    def test_crypto_reference_tickers_paginates_next_url(self):
+        client = PolygonClient("test-key")
+        client.session = FakeSession(
+            [
+                FakeResponse(
+                    200,
+                    {
+                        "results": [{"ticker": "X:AAAUSD"}],
+                        "next_url": "https://api.polygon.io/v3/reference/tickers?cursor=crypto-next",
+                    },
+                ),
+                FakeResponse(200, {"results": [{"ticker": "X:BBBUSD"}]}),
+            ]
+        )
+
+        result = client.get_reference_crypto_tickers()
+
+        self.assertEqual(result, [{"ticker": "X:AAAUSD"}, {"ticker": "X:BBBUSD"}])
+        self.assertEqual(len(client.session.calls), 2)
+        self.assertEqual(client.session.calls[0]["params"]["market"], "crypto")
+        self.assertEqual(client.session.calls[1]["params"], {})
+
     def test_aggregate_pagination_fixes_original_stale_truncation_and_deduplicates(self):
         client = PolygonClient("test-key")
         first_page = {

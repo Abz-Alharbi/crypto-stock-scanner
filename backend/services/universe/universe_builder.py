@@ -53,6 +53,10 @@ def _int_config(name, default):
     return int(_config_value(name, default))
 
 
+def _float_config(name, default):
+    return float(_config_value(name, default))
+
+
 def _today_utc():
     return datetime.utcnow().date()
 
@@ -164,6 +168,129 @@ def build_volume_history(eligible_symbols, lookback_days, provider=None):
     return volume_sum, volume_count, processed_days, skipped_days
 
 
+def fetch_eligible_crypto_symbols(provider=None):
+    provider = provider or get_provider()
+    rows = provider.reference_universe(AssetClass.CRYPTO, None)
+    symbols = {
+        symbol
+        for item in rows
+        for symbol in [_extract_symbol(item)]
+        if symbol
+        # Massive's live crypto payload identifies the quote as currency_symbol
+        # (for example BTC is base_currency_symbol and USD is currency_symbol).
+        # The fallback retains compatibility with older/documented variants.
+        and str(
+            item.get("currency_symbol")
+            or item.get("base_currency_symbol")
+            or ""
+        ).upper()
+        == "USD"
+    }
+    logger.info(
+        "crypto_universe_reference_tickers_fetched",
+        extra={"crypto_usd_count": len(symbols)},
+    )
+    return symbols
+
+
+def _fetch_crypto_grouped_day(day, provider):
+    date_text = day.isoformat()
+    try:
+        return date_text, provider.grouped_daily_crypto(date_text), None
+    except Exception as exc:
+        return date_text, [], str(exc)
+
+
+def build_crypto_volume_history(eligible_symbols, lookback_days, provider=None):
+    """Accumulate daily USD notional as base volume multiplied by VWAP."""
+    provider = provider or get_provider()
+    notional_sum = defaultdict(float)
+    volume_count = defaultdict(int)
+    processed_days = 0
+    skipped_days = 0
+    invalid_rows = 0
+    skipped_samples = []
+    dates = list(_date_range(lookback_days))
+    request_interval = (
+        _float_config("UNIVERSE_CRYPTO_REQUEST_INTERVAL_SECONDS", 13.0)
+        if getattr(provider, "provider_id", None) == "polygon"
+        else 0.0
+    )
+    # Count the preceding reference-ticker request in the same rate window.
+    previous_request_started = time.monotonic() if request_interval > 0 else None
+    max_attempts = max(1, _int_config("UNIVERSE_CRYPTO_DATE_MAX_ATTEMPTS", 2))
+    pending_dates = dates
+    final_failures = []
+    for attempt in range(1, max_attempts + 1):
+        retry_dates = []
+        failure_details = []
+        for day in pending_dates:
+            if request_interval > 0 and previous_request_started is not None:
+                remaining = request_interval - (
+                    time.monotonic() - previous_request_started
+                )
+                if remaining > 0:
+                    time.sleep(remaining)
+            previous_request_started = time.monotonic()
+            date_text, rows, error = _fetch_crypto_grouped_day(day, provider)
+            if error or not rows:
+                retry_dates.append(day)
+                failure_details.append(
+                    {"date": date_text, "error": error or "no grouped data"}
+                )
+                continue
+
+            processed_days += 1
+            for row in rows:
+                symbol = _extract_symbol(row)
+                if symbol not in eligible_symbols:
+                    continue
+                try:
+                    volume = float(row["v"])
+                    vwap = float(row["vw"])
+                except (KeyError, TypeError, ValueError):
+                    invalid_rows += 1
+                    continue
+                if volume < 0 or vwap <= 0:
+                    invalid_rows += 1
+                    continue
+                notional_sum[symbol] += volume * vwap
+                volume_count[symbol] += 1
+
+        if not retry_dates:
+            final_failures = []
+            break
+        if attempt < max_attempts:
+            logger.warning(
+                "crypto_universe_grouped_dates_retrying",
+                extra={
+                    "attempt": attempt,
+                    "remaining_dates": len(retry_dates),
+                    "failure_samples": failure_details[:10],
+                },
+            )
+            pending_dates = retry_dates
+            continue
+        final_failures = failure_details
+
+    skipped_days = len(final_failures)
+    skipped_samples = final_failures[:10]
+    for failure in final_failures:
+        logger.info("crypto_universe_grouped_day_skipped", extra=failure)
+
+    logger.info(
+        "crypto_universe_grouped_days_processed",
+        extra={
+            "lookback_days": lookback_days,
+            "processed_days": processed_days,
+            "skipped_days": skipped_days,
+            "invalid_rows": invalid_rows,
+            "skipped_samples": skipped_samples,
+        },
+    )
+    return notional_sum, volume_count, processed_days, skipped_days
+
+
 def rank_symbols(eligible_symbols, volume_sum, volume_count, computed_at):
     ranked_records = []
     final_counts = {}
@@ -203,26 +330,88 @@ def rank_symbols(eligible_symbols, volume_sum, volume_count, computed_at):
     return ranked_records, final_counts
 
 
+def rank_crypto_symbols(
+    eligible_symbols,
+    notional_sum,
+    volume_count,
+    computed_at,
+    *,
+    window_days=None,
+):
+    target_size = _int_config("UNIVERSE_CRYPTO_SIZE", 100)
+    denominator = int(
+        window_days
+        if window_days is not None
+        else _int_config("UNIVERSE_CRYPTO_LOOKBACK_DAYS", 90)
+    )
+    if denominator <= 0:
+        raise UniverseCandidateError("crypto ranking window must be positive")
+    scored = []
+    for symbol in eligible_symbols:
+        count = volume_count.get(symbol, 0)
+        if count <= 0:
+            continue
+        scored.append((symbol, notional_sum[symbol] / denominator))
+
+    scored.sort(key=lambda item: (-item[1], item[0]))
+    selected = scored[:target_size]
+    if len(selected) < target_size:
+        logger.warning(
+            "crypto_universe_ranked_count_below_target",
+            extra={"target": target_size, "actual": len(selected)},
+        )
+
+    records = [
+        UniverseSymbol(
+            symbol=symbol,
+            asset_class="crypto",
+            venue="GLOBAL_CRYPTO",
+            quote_currency="USD",
+            universe_key="crypto_static",
+            exchange=None,
+            avg_daily_volume=avg_notional_volume,
+            rank=rank,
+            computed_at=computed_at,
+        )
+        for rank, (symbol, avg_notional_volume) in enumerate(selected, start=1)
+    ]
+    return records, {"crypto_static": len(records)}
+
+
 def validate_candidate(
     records,
     final_counts,
     computed_at,
     *,
     processed_days=None,
+    expected_counts=None,
+    minimum_processed_days=None,
 ):
     if not records:
         raise UniverseCandidateError("candidate universe is empty")
     if processed_days is not None and processed_days <= 0:
         raise UniverseCandidateError("candidate has no successfully processed market days")
-
-    for exchange, config in EXCHANGE_CONFIG.items():
-        expected = _int_config(
-            config["target_config"], 500 if exchange == "NASDAQ" else 300
+    if (
+        minimum_processed_days is not None
+        and int(processed_days or 0) < int(minimum_processed_days)
+    ):
+        raise UniverseCandidateError(
+            "candidate processed "
+            f"{int(processed_days or 0)} days; required {int(minimum_processed_days)}"
         )
-        actual = int(final_counts.get(exchange, 0))
+
+    if expected_counts is None:
+        expected_counts = {
+            exchange: _int_config(
+                config["target_config"], 500 if exchange == "NASDAQ" else 300
+            )
+            for exchange, config in EXCHANGE_CONFIG.items()
+        }
+    for scope, expected in expected_counts.items():
+        actual = int(final_counts.get(scope, 0))
         if actual < expected:
             raise UniverseCandidateError(
-                f"candidate {exchange} count {actual} is below required {expected}"
+                f"candidate {scope} count {actual} is below required {expected}"
             )
 
     max_age = _int_config("UNIVERSE_MAX_CANDIDATE_AGE_SECONDS", 3600)
@@ -239,6 +428,9 @@ def save_universe(
     final_counts=None,
     computed_at=None,
     processed_days=None,
+    replace_universe_keys=None,
+    expected_counts=None,
+    minimum_processed_days=None,
 ):
     records = list(records)
     computed_at = computed_at or (
@@ -254,9 +446,22 @@ def save_universe(
         final_counts,
         computed_at,
         processed_days=processed_days,
+        expected_counts=expected_counts,
+        minimum_processed_days=minimum_processed_days,
     )
+    replacement_keys = set(replace_universe_keys or ())
+    if not replacement_keys:
+        replacement_keys = {record.universe_key for record in records}
+    if not replacement_keys:
+        raise UniverseCandidateError("candidate has no universe replacement scope")
+    if any(record.universe_key not in replacement_keys for record in records):
+        raise UniverseCandidateError(
+            "candidate contains rows outside its universe replacement scope"
+        )
     try:
-        UniverseSymbol.query.delete()
+        UniverseSymbol.query.filter(
+            UniverseSymbol.universe_key.in_(replacement_keys)
+        ).delete(synchronize_session=False)
         db.session.bulk_save_objects(records)
         db.session.commit()
     except Exception:
@@ -346,6 +551,127 @@ def build_and_save_universe():
     return payload
 
 
+def build_and_save_crypto_universe():
+    started = time.time()
+    lookback_days = _int_config("UNIVERSE_CRYPTO_LOOKBACK_DAYS", 90)
+    target_size = _int_config("UNIVERSE_CRYPTO_SIZE", 100)
+    computed_at = datetime.utcnow()
+    market_data_provider = get_provider()
+    universe_provider = registry.get("crypto_static")
+    try:
+        candidate = universe_provider.build_candidate(
+            market_data_provider,
+            lookback_days,
+            computed_at,
+        )
+        records = candidate["records"]
+        reference_counts = candidate["reference_counts"]
+        processed_days = candidate["processed_days"]
+        skipped_days = candidate["skipped_days"]
+        final_counts = candidate["final_counts"]
+    except Exception as exc:
+        _set_build_status(
+            asset_class="crypto",
+            status="failed",
+            degraded=True,
+            degraded_reason=f"{type(exc).__name__}: {exc}",
+            retained_previous=True,
+        )
+        raise
+
+    payload = {
+        "asset_class": "crypto",
+        "reference_counts": reference_counts,
+        "processed_days": processed_days,
+        "skipped_days": skipped_days,
+        "final_counts": final_counts,
+        "total_symbols": len(records),
+        "lookback_days": lookback_days,
+        "ranking_metric": "average_daily_usd_notional_volume",
+        "computed_at": computed_at.isoformat(),
+        "duration_seconds": round(time.time() - started, 2),
+    }
+    logger.info("crypto_universe_rebuild_verification", extra=payload)
+    try:
+        save_universe(
+            records,
+            final_counts=final_counts,
+            computed_at=computed_at,
+            processed_days=processed_days,
+            replace_universe_keys={"crypto_static"},
+            expected_counts={"crypto_static": target_size},
+            minimum_processed_days=lookback_days,
+        )
+    except UniverseCandidateError as exc:
+        logger.error(
+            "crypto_universe_candidate_rejected_retaining_previous",
+            extra={"reason": str(exc), **payload},
+        )
+        payload.update(
+            {
+                "status": "degraded",
+                "degraded": True,
+                "degraded_reason": str(exc),
+                "retained_previous": True,
+                "stored_symbols": UniverseSymbol.query.filter_by(
+                    universe_key="crypto_static"
+                ).count(),
+            }
+        )
+        _set_build_status(**payload)
+        return payload
+
+    payload.update(
+        {
+            "status": "healthy",
+            "degraded": False,
+            "degraded_reason": None,
+            "retained_previous": False,
+        }
+    )
+    _set_build_status(**payload)
+    return payload
+
+
+def build_and_save_all_universes():
+    """Run both asset-class refreshes from the shared scheduled job."""
+    results = {}
+    failures = []
+    for asset_class, builder in (
+        ("equity", build_and_save_universe),
+        ("crypto", build_and_save_crypto_universe),
+    ):
+        try:
+            results[asset_class] = builder()
+        except Exception as exc:
+            logger.exception(
+                "scheduled_universe_rebuild_failed",
+                extra={"asset_class": asset_class},
+            )
+            failures.append((asset_class, exc))
+    if failures:
+        detail = "; ".join(
+            f"{asset_class}: {type(exc).__name__}: {exc}"
+            for asset_class, exc in failures
+        )
+        _set_build_status(
+            status="failed",
+            degraded=True,
+            degraded_reason=detail,
+            retained_previous=True,
+            assets=results,
+        )
+        raise RuntimeError(f"One or more universe rebuilds failed: {detail}") from failures[0][1]
+    _set_build_status(
+        status="healthy",
+        degraded=False,
+        degraded_reason=None,
+        retained_previous=False,
+        assets=results,
+    )
+    return results
+
+
 def get_scan_universe_symbols(fallback_symbols):
     from backend.services.universe.registry import registry
 
@@ -359,10 +685,17 @@ def get_scan_universe_symbols(fallback_symbols):
 
 
 def status_payload():
-    total = UniverseSymbol.query.count()
+    equity_total = UniverseSymbol.query.filter_by(asset_class="equity").count()
+    crypto_count = UniverseSymbol.query.filter_by(asset_class="crypto").count()
+    total_persisted = equity_total + crypto_count
     nasdaq_count = UniverseSymbol.query.filter_by(exchange="NASDAQ").count()
     nyse_count = UniverseSymbol.query.filter_by(exchange="NYSE").count()
-    last_computed_at = db.session.query(func.max(UniverseSymbol.computed_at)).scalar()
+    equity_last_computed_at = db.session.query(
+        func.max(UniverseSymbol.computed_at)
+    ).filter(UniverseSymbol.asset_class == "equity").scalar()
+    crypto_last_computed_at = db.session.query(
+        func.max(UniverseSymbol.computed_at)
+    ).filter(UniverseSymbol.asset_class == "crypto").scalar()
     from backend.services.universe.registry import (
         fallback_for_universe,
         registry,
@@ -391,10 +724,18 @@ def status_payload():
         }
 
     return {
-        "total_symbols": total,
+        # Backwards-compatible equity fields retained for existing consumers.
+        "total_symbols": equity_total,
+        "total_persisted_symbols": total_persisted,
+        "crypto_count": crypto_count,
         "nasdaq_count": nasdaq_count,
         "nyse_count": nyse_count,
-        "last_computed_at": last_computed_at.isoformat() if last_computed_at else None,
+        "last_computed_at": (
+            equity_last_computed_at.isoformat() if equity_last_computed_at else None
+        ),
+        "crypto_last_computed_at": (
+            crypto_last_computed_at.isoformat() if crypto_last_computed_at else None
+        ),
         "universes": universes,
         "last_build": _get_build_status(),
     }

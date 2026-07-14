@@ -12,8 +12,8 @@ from backend.services.universe.catalog import (
     NYSE_SYMBOLS,
 )
 from backend.services.universe.providers import (
+    CryptoVolumeUniverseProvider,
     EquityVolumeUniverseProvider,
-    StaticUniverseProvider,
     UniverseProvider,
     UniverseResolution,
 )
@@ -101,11 +101,9 @@ registry.register(
     EquityVolumeUniverseProvider("nyse_top", "NYSE Top Volume", ("nyse_top",))
 )
 registry.register(
-    StaticUniverseProvider(
+    CryptoVolumeUniverseProvider(
         "crypto_static",
-        AssetClass.CRYPTO,
         "Crypto Top USD Pairs",
-        tuple(CRYPTO_SYMBOLS),
     ),
     default=True,
 )

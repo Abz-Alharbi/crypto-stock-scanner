@@ -8,6 +8,6 @@ def rebuild_universe_job():
 
         universe_builder.clear_universe_refresh_marker()
         try:
-            return universe_builder.build_and_save_universe()
+            return universe_builder.build_and_save_all_universes()
         finally:
             universe_builder.schedule_next_universe_rebuild()

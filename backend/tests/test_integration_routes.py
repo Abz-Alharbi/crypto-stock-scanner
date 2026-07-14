@@ -233,3 +233,82 @@ def test_scan_route_completes_with_mocked_polygon_data(client, monkeypatch, univ
         "provider_failures",
         "persistence_failures",
     } <= set(payload["meta"])
+
+
+def test_crypto_scan_submit_complete_preserves_ranked_universe_context(
+    client, app, monkeypatch
+):
+    from backend.models.universe import UniverseSymbol
+    from backend.services import scan_jobs
+
+    state_store = {}
+    monkeypatch.setattr(scan_jobs, "redis_get_json", lambda key: state_store.get(key))
+    monkeypatch.setattr(
+        scan_jobs,
+        "redis_set_json",
+        lambda key, value, ttl=None: state_store.__setitem__(key, value) or True,
+    )
+    monkeypatch.setattr(scan_jobs, "redis_set_value", lambda *args, **kwargs: True)
+    monkeypatch.setattr(scan_jobs, "redis_exists", lambda key: False)
+    monkeypatch.setenv("SCAN_QUEUE_SYNC", "true")
+
+    with app.app_context():
+        db.session.add_all(
+            [
+                UniverseSymbol(
+                    symbol="X:BTCUSD",
+                    asset_class="crypto",
+                    venue="GLOBAL_CRYPTO",
+                    quote_currency="USD",
+                    universe_key="crypto_static",
+                    avg_daily_volume=10_000_000,
+                    rank=1,
+                ),
+                UniverseSymbol(
+                    symbol="X:ETHUSD",
+                    asset_class="crypto",
+                    venue="GLOBAL_CRYPTO",
+                    quote_currency="USD",
+                    universe_key="crypto_static",
+                    avg_daily_volume=5_000_000,
+                    rank=2,
+                ),
+            ]
+        )
+        db.session.commit()
+
+    register_response = client.post(
+        "/api/auth/register",
+        json={
+            "username": "crypto_scan_user",
+            "email": "crypto-scan@example.test",
+            "password": "Password123",
+        },
+    )
+    headers = _bearer(register_response.get_json()["token"])
+    scan_response = client.post(
+        "/api/scan",
+        json={
+            "market": "crypto",
+            "timeframe": "1D",
+            "filters": ["ema_golden_cross"],
+            "limit": 10,
+            "universe": "crypto_static",
+        },
+        headers=headers,
+    )
+
+    assert scan_response.status_code == 202, scan_response.get_json()
+    job_id = scan_response.get_json()["job_id"]
+    status_response = client.get(f"/api/scan/status/{job_id}", headers=headers)
+    payload = status_response.get_json()
+
+    assert status_response.status_code == 200
+    assert payload["status"] == "completed"
+    assert payload["meta"]["market"] == "crypto"
+    assert payload["meta"]["universe"] == "crypto_static"
+    assert payload["meta"]["universe_source"] == "database"
+    assert payload["meta"]["universe_degraded"] is False
+    assert payload["meta"]["timeframe"] == "1D"
+    assert payload["meta"]["total_attempted"] == 2
+    assert all(result["market"] == "crypto" for result in payload["results"])

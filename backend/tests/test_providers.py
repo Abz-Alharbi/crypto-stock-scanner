@@ -42,6 +42,12 @@ class RecordingPolygonClient:
         )
         return [{"ticker": "AAPL", "type": "CS"}]
 
+    def get_reference_crypto_tickers(self, limit=1000):
+        self.calls.append(
+            {"operation": "get_reference_crypto_tickers", "limit": limit}
+        )
+        return [{"ticker": "X:BTCUSD", "base_currency_symbol": "USD"}]
+
     def get_snapshot_crypto(self):
         self.calls.append({"operation": "get_snapshot_crypto"})
         return [{"ticker": "X:BTCUSD"}]
@@ -49,6 +55,10 @@ class RecordingPolygonClient:
     def get_grouped_daily_stocks(self, day):
         self.calls.append({"operation": "get_grouped_daily_stocks", "day": day})
         return [{"T": "AAPL", "v": 100}]
+
+    def get_grouped_daily_crypto(self, day):
+        self.calls.append({"operation": "get_grouped_daily_crypto", "day": day})
+        return [{"T": "X:BTCUSD", "v": 2, "vw": 50_000}]
 
     def get_ticker_details(self, ticker):
         self.calls.append({"operation": "get_ticker_details", "ticker": ticker})
@@ -95,8 +105,10 @@ def test_polygon_provider_delegates_reference_search_snapshot_grouped_and_detail
 
     assert provider.search("apple", AssetClass.EQUITY, limit=5)[0]["ticker"] == "AAPL"
     assert provider.reference_universe(AssetClass.EQUITY, "XNAS", limit=10)[0]["ticker"] == "AAPL"
+    assert provider.reference_universe(AssetClass.CRYPTO, None, limit=10)[0]["ticker"] == "X:BTCUSD"
     assert provider.crypto_snapshot()[0]["ticker"] == "X:BTCUSD"
     assert provider.grouped_daily_stocks("2026-01-02")[0]["T"] == "AAPL"
+    assert provider.grouped_daily_crypto("2026-01-02")[0]["T"] == "X:BTCUSD"
     assert provider.ticker_details(instrument)["ticker"] == "AAPL"
 
 

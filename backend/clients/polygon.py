@@ -297,9 +297,36 @@ class PolygonClient:
             params = None
         return tickers
 
+    def get_reference_crypto_tickers(self, limit=1000):
+        """Fetch every active crypto ticker, following reference pagination."""
+        tickers = []
+        next_url = "/v3/reference/tickers"
+        params = {
+            "market": "crypto",
+            "active": "true",
+            "limit": limit,
+        }
+
+        while next_url:
+            data = self._request(next_url, params)
+            if not data:
+                break
+            tickers.extend(data.get("results") or [])
+            next_url = data.get("next_url")
+            params = None
+        return tickers
+
     def get_grouped_daily_stocks(self, date):
         """Fetch grouped US stock aggregates for one trading date."""
         endpoint = f"/v2/aggs/grouped/locale/us/market/stocks/{date}"
+        data = self._request(endpoint, {"adjusted": "true"})
+        if data and data.get("results"):
+            return data["results"]
+        return []
+
+    def get_grouped_daily_crypto(self, date):
+        """Fetch grouped global crypto aggregates for one UTC date."""
+        endpoint = f"/v2/aggs/grouped/locale/global/market/crypto/{date}"
         data = self._request(endpoint, {"adjusted": "true"})
         if data and data.get("results"):
             return data["results"]

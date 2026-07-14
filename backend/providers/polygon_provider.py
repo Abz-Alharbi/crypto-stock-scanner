@@ -134,9 +134,15 @@ class PolygonProvider:
 
     def reference_universe(self, asset_class, venue, limit=1000):
         parsed_asset_class = AssetClass.from_wire(asset_class)
-        if parsed_asset_class is not AssetClass.EQUITY:
+        if parsed_asset_class is AssetClass.CRYPTO:
+            return self._call(
+                "reference_universe",
+                lambda: self.client.get_reference_crypto_tickers(limit=limit),
+                asset_class=parsed_asset_class,
+            )
+        if parsed_asset_class is not AssetClass.EQUITY or not venue:
             raise ProviderError(
-                "Polygon equity reference universe does not support this asset class",
+                "Polygon equity reference universe requires an exchange venue",
                 provider=self.provider_id,
                 operation="reference_universe",
                 error_type="unsupported_asset_class",
@@ -161,6 +167,14 @@ class PolygonProvider:
             "grouped_daily_stocks",
             lambda: self.client.get_grouped_daily_stocks(day_value),
             asset_class=AssetClass.EQUITY,
+        )
+
+    def grouped_daily_crypto(self, day):
+        day_value = self._date_wire(day)
+        return self._call(
+            "grouped_daily_crypto",
+            lambda: self.client.get_grouped_daily_crypto(day_value),
+            asset_class=AssetClass.CRYPTO,
         )
 
     def ticker_details(self, instrument: Instrument):
